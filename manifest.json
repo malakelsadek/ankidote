@@ -1,0 +1,9 @@
+{
+  "name": "ankidote",
+  "short_name": "ankidote",
+  "start_url": ".",
+  "display": "standalone",
+  "background_color": "#f6f4ef",
+  "theme_color": "#f6f4ef",
+  "icons": [{ "src": "icon.png", "sizes": "180x180", "type": "image/png" }]
+}

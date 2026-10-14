@@ -1,0 +1,17 @@
+{
+  "deck": "Sample - Cardiology",
+  "questions": [
+    {
+      "stem": "A 68-year-old man presents with crushing central chest pain radiating to the left arm for 40 minutes. ECG shows ST elevation in leads II, III and aVF. Which coronary artery is most likely occluded?",
+      "options": ["Left anterior descending", "Left circumflex", "Right coronary artery", "Left main stem", "Posterior descending artery branch of the LAD"],
+      "answer": 2,
+      "explanation": "ST elevation in II, III, aVF is an inferior MI, usually from the right coronary artery."
+    },
+    {
+      "stem": "Which drug class is first-line for symptomatic relief of heart failure congestion?",
+      "options": ["Beta blockers", "Loop diuretics", "ACE inhibitors", "Calcium channel blockers", "Statins"],
+      "answer": 1,
+      "explanation": "Loop diuretics relieve congestion. ACE inhibitors and beta blockers improve prognosis but are not for symptom relief of fluid overload."
+    }
+  ]
+}
