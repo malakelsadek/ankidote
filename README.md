@@ -2,7 +2,7 @@
 
 **The antidote to medical exam stress.**
 
-ankidote is a small study app that turns lectures into exam-style multiple-choice questions and then makes sure you actually remember them, using the same spaced repetition idea as Anki.
+ankidote is a small study app that turns your lecture slides and notes into exam-style multiple-choice questions and then makes sure you actually remember them, using the same spaced repetition idea as Anki.
 
 <p align="center">
   <img src="screenshots/today.png" alt="The Today page: questions to study, streak, and folders" width="820">
@@ -22,13 +22,13 @@ It started as a test for one person, so it is deliberately small: no accounts, n
 
 ## How it works
 
-### 1. Make questions from a lecture
+### 1. Make questions from your material
 
-The **Guide** tab has ready-made prompts (standard SBAs, quick recall, pharmacology, anatomy, hard exam-level, and more). Pick one, choose how many questions you want, copy it, and paste it into an AI together with the lecture. The AI replies with a small file of questions.
+The **Guide** tab has ready-made prompts (standard SBAs, quick recall, pharmacology, anatomy, hard exam-level, and more). Pick one, choose how many questions you want, copy it, and paste it into an AI together with your slides, notes or PDF. The AI replies with a small file of questions.
 
 ### 2. Import them into a folder
 
-Tap **+**, choose a folder, and pick the file. Folders keep decks tidy, for example one folder per subject and one deck per lecture.
+Tap **+**, choose a folder, pick the file, and optionally attach the slides as PDFs so you can open them while studying. Folders keep decks tidy, for example one folder per subject and one deck per lecture.
 
 <p align="center">
   <img src="screenshots/decks.png" alt="A folder open, showing its decks as stacks of cards" width="820">
@@ -68,7 +68,7 @@ Eight colour themes, light and dark mode, optional sound effects, and a backup r
 
 ## Features
 
-- Questions generated from your own lectures, with a prompt library and a question-count setting
+- Questions generated from your own material, with a prompt library, a question-count setting and an even spread of correct answers
 - Anki-style spaced repetition (SM-2) with Hard, Good and Easy ratings
 - Folders and decks, with a plus button to add either
 - Attach up to 50 slide PDFs to a deck and open the exact slide a question came from, right inside the app

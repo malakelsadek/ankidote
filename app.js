@@ -318,8 +318,6 @@ const ICONS = {
   stats: '<path d="M5 20V10M12 20V4M19 20v-7"/>',
   data: '<path d="M12 4v11m0 0-4-4m4 4 4-4M5 20h14"/>',
   guide: '<circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.7.4-1 .9-1 1.7M12 17h.01"/>',
-  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 3v2M12 19v2M3 12h2M19 12h2M5.6 5.6 7 7M17 17l1.4 1.4M5.6 18.4 7 17M17 7l1.4-1.4"/>',
-  moon: '<path d="M20 14.5A8 8 0 0 1 9.5 4a8 8 0 1 0 10.5 10.5z"/>',
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   folders: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   decks: '<rect x="7" y="3" width="13" height="14" rx="2"/><path d="M4 7v12a2 2 0 0 0 2 2h10"/>',
@@ -334,12 +332,6 @@ const FILL = {
   check: '<circle cx="12" cy="12" r="10"/><path d="m7.500 12.500 3 3 6-6.500" fill="none" stroke="#fff" stroke-width="2.600" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 const fsvg = (k, c, s = 26) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="${c}">${FILL[k]}</svg>`;
-const NODE_ICONS = [
-  '<path d="M12 5v14M5 12h14"/>',
-  '<path d="M12 20s-7-4.400-7-10a4 4 0 0 1 7-2.600A4 4 0 0 1 19 10c0 5.600-7 10-7 10z"/>',
-  '<path d="M3 12h4l2-6 4 12 2-6h6"/>',
-  '<rect x="3" y="8.500" width="18" height="7" rx="3.500" transform="rotate(-40 12 12)"/><path d="M12 8.500v7" transform="rotate(-40 12 12)"/>',
-];
 function renderNav() {
   const nav = document.getElementById('nav');
   nav.className = min ? 'min' : '';
@@ -572,13 +564,9 @@ async function home(msg = '') {
   await loadFM();
   const [cards, logs, last, pdfN] = await Promise.all([all('cards'), all('logs'), getMeta('lastBackup'), pdfCounts()]);
   const now = Date.now(), today = dayKey(now);
-  const dueN = cards.filter(c => c.reps && c.due <= now).length;
-  const newN = cards.filter(c => !c.reps).length;
-  const reviews = logs.filter(l => !l.isNew);
   const stale = bkDays && logs.length && (!last || now - last > bkDays * DAY);
   const banner = `${stale ? `<div class="banner"><span>No backup ${last ? 'for ' + Math.floor((now - last) / DAY) + ' days' : 'yet'}.</span><button id="bk">Back up</button></div>` : ''}
     ${msg ? `<div class="msg ${/failed|valid JSON/.test(msg) ? 'err' : ''}">${esc(msg)}</div>` : ''}`;
-  const tile = (v, l) => `<div><b>${v}</b><span>${l}</span></div>`;
   const todoOf = cs => cs.filter(c => !c.reps || c.due <= now).length;
   const trash = svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>', 20);
   const delBadge = (attr, v) => editing ? `<span class="del" data-${attr}="${esc(v)}" role="button" aria-label="Delete">${trash}</span>` : '';
@@ -646,14 +634,14 @@ async function home(msg = '') {
     const share = x => nC ? 100 * x / nC : 0;
     // one pass over the logs for everything below (per day, per deck, totals)
     const byDay = new Map(), byDeck = new Map();
-    let okAll = 0, revOk = 0, revN = 0;
+    let revOk = 0, revN = 0;
     for (const l of logs) {
       const k = dayKey(l.t);
       let d = byDay.get(k); if (!d) byDay.set(k, d = { total: 0, ok: 0 });
       let dk = byDeck.get(l.deck); if (!dk) byDeck.set(l.deck, dk = { n: 0, ok: 0 });
       d.total++; dk.n++;
       if (!l.isNew) revN++;
-      if (l.correct) { d.ok++; dk.ok++; okAll++; if (!l.isNew) revOk++; }
+      if (l.correct) { d.ok++; dk.ok++; if (!l.isNew) revOk++; }
     }
     const td = byDay.get(today) || { total: 0, ok: 0 };
     const days = [...Array(14)].map((_, i) => { const t = now - (13 - i) * DAY; return { t, ...(byDay.get(dayKey(t)) || { total: 0, ok: 0 }) }; });
