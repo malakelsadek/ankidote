@@ -432,6 +432,71 @@ body.studying main{padding-top:0}
 .set .row{width:100%;flex-wrap:nowrap}
 .set .row button{flex:1;min-width:0;padding:0 10px}
 }
+/* guide */
+.gsteps{display:grid;gap:16px}
+.gs{display:flex;gap:18px;align-items:flex-start}
+.gn{flex:none;width:42px;height:42px;border-radius:50%;background:var(--acc);color:var(--onacc);box-shadow:0 3px 0 var(--acc-d);display:grid;place-items:center;font-size:19px;font-weight:900}
+.gb{flex:1;min-width:0}
+.gb h3{margin:4px 0 12px;font-size:23px;font-weight:900}
+.gb>p{margin:0 0 14px}
+.gsel{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.gsel label{display:block;font-weight:800;font-size:15px;color:var(--mut)}
+.gsel .inp,.gb>.inp{margin:6px 0 14px}
+.gdesc{color:var(--fg)!important;font-weight:600;margin:0 0 14px!important}
+.prev{margin-top:16px}
+.prev summary{cursor:pointer;color:var(--blue-d);font-weight:800;font-size:16px}
+.prev .prompt{margin:12px 0 0;max-height:280px}
+@media(max-width:699px){.gsel{grid-template-columns:1fr}.gs{gap:14px}.gn{width:36px;height:36px;font-size:17px}}
+/* edit mode: delete badges */
+.deckcard,.folder,.bf{position:relative}
+.del{position:absolute;top:-12px;left:-12px;z-index:5;width:42px;height:42px;border-radius:50%;background:var(--bad);color:#fff;display:grid;place-items:center;box-shadow:0 3px 0 var(--bad-d);cursor:pointer}
+@keyframes wiggle{0%{transform:rotate(-.7deg)}100%{transform:rotate(.7deg)}}
+.editing{animation:wiggle .2s ease-in-out infinite alternate}
+.page.still .editing{animation:wiggle .2s ease-in-out infinite alternate!important}
+.edit{min-height:50px;padding:0 20px}
+.edit.on{background:var(--accsoft);border-color:var(--acc);color:var(--acc-d)}
+.tbtns{display:flex;gap:12px;align-items:center;margin-top:6px}
+.tbtns .plus{margin-top:0}
+.hud .edit{margin-left:14px;min-height:46px}
+.danger{background:var(--bad)!important;border-color:var(--bad)!important;color:#fff!important;box-shadow:0 4px 0 var(--bad-d)!important}
+@media(prefers-reduced-motion:reduce){.page.still .editing{animation:none!important}}
+/* slides */
+.sl{position:relative;z-index:4;display:inline-flex;align-items:center;gap:6px;padding:5px 12px;border-radius:12px;border:2px solid var(--line);background:var(--card);color:var(--mut);font-size:14px;font-weight:800;letter-spacing:.02em}
+.sl.on{background:var(--bluesoft);border-color:var(--blue);color:var(--blue-d)}
+.sl svg{width:16px;height:16px}
+.deckcard .sl:hover{border-color:var(--blue);color:var(--blue-d)}
+.ovl{z-index:90}
+.pickpdf{width:100%;justify-content:flex-start;min-height:52px;margin:2px 0 8px;text-transform:none;letter-spacing:0;font-size:17px}
+.pname{margin:0 0 18px!important;font-size:15px!important}
+.slbtn{width:100%;margin-top:14px;min-height:50px;text-transform:none;letter-spacing:0;font-size:16px}
+.slbtn svg{width:20px;height:20px}
+.pdfv{position:fixed;inset:0;z-index:70;background:var(--bg);display:flex;flex-direction:column;animation:fade .2s backwards}
+.pbar{display:flex;align-items:center;gap:12px;padding:max(14px,env(safe-area-inset-top)) max(16px,env(safe-area-inset-right)) 10px max(16px,env(safe-area-inset-left));border-bottom:2px solid var(--line)}
+.ptitle{flex:1;min-width:0;font-weight:900;font-size:19px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.pbtn{min-height:42px;padding:0 16px;font-size:14px;color:var(--bad)}
+.pstage{flex:1;min-height:0;display:grid;place-items:center;position:relative;background:color-mix(in srgb,var(--line) 55%,var(--bg));padding:12px}
+.pstage canvas{background:#fff;border-radius:8px;box-shadow:0 6px 24px rgba(0,0,0,.18);touch-action:pan-y}
+.pmsg{position:absolute;inset:0;display:grid;place-items:center;text-align:center;padding:30px;color:var(--mut);font-weight:700;font-size:18px}
+.pmsg[hidden]{display:none}
+.pnav{display:flex;align-items:center;justify-content:center;gap:22px;padding:12px 16px max(14px,env(safe-area-inset-bottom));border-top:2px solid var(--line)}
+.pnav button{width:64px;min-height:54px;padding:0;font-size:30px;line-height:1}
+.pnav span{min-width:110px;text-align:center;font-weight:900;font-size:19px}
+.dfoot{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.deckcard .dfoot .go{margin-left:auto;align-self:auto}
+/* slides sheet */
+.plist{display:grid;gap:10px;margin:0 0 18px;max-height:44vh;overflow-y:auto;padding:2px 4px 6px 2px}
+.prow{display:flex;gap:10px;align-items:center}
+.pview{flex:1;min-width:0;justify-content:flex-start;gap:12px;min-height:56px;padding:0 14px;text-transform:none;letter-spacing:0;font-size:16px;color:var(--fg);text-align:left}
+.pview .pn1{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:800}
+.pview small{color:var(--mut);font-weight:700;flex:none}
+.pview svg{flex:none;color:var(--blue-d)}
+.prm{flex:none;width:52px;min-height:56px;padding:0;color:var(--bad)}
+.pempty{margin:0 0 6px!important}
+.snote{color:var(--fg)!important;font-weight:700}
+/* slides list: names truncate instead of stretching the dialog, so there is never a sideways scrollbar */
+.plist{grid-template-columns:minmax(0,1fr);overflow-x:hidden}
+.prow{min-width:0}
+.sheet:has(.plist){width:min(640px,100%)}
 </style>
 </head>
 <body>

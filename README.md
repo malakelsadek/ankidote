@@ -71,6 +71,8 @@ Eight colour themes, light and dark mode, optional sound effects, and a backup r
 - Questions generated from your own lectures, with a prompt library and a question-count setting
 - Anki-style spaced repetition (SM-2) with Hard, Good and Easy ratings
 - Folders and decks, with a plus button to add either
+- Attach up to 50 slide PDFs to a deck and open the exact slide a question came from, right inside the app
+- Delete decks and folders you no longer need
 - Practice mode to drill everything again without affecting your schedule
 - Stats focused on what to do next: progress, accuracy, weak topics, upcoming reviews
 - Streak counter, sound effects, 8 colour themes, light and dark mode

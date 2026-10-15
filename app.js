@@ -7,11 +7,13 @@ const dayKey = t => { const d = new Date(t); return d.getFullYear() * 10000 + (d
 
 // ---- storage (IndexedDB) ----
 const db = new Promise((res, rej) => {
-  const r = indexedDB.open('ankidote', 1);
+  const r = indexedDB.open('ankidote', 2);
   r.onupgradeneeded = () => {
-    r.result.createObjectStore('cards', { keyPath: 'id' });
-    r.result.createObjectStore('logs', { autoIncrement: true });
-    r.result.createObjectStore('meta');
+    const d = r.result;
+    if (!d.objectStoreNames.contains('cards')) d.createObjectStore('cards', { keyPath: 'id' });
+    if (!d.objectStoreNames.contains('logs')) d.createObjectStore('logs', { autoIncrement: true });
+    if (!d.objectStoreNames.contains('meta')) d.createObjectStore('meta');
+    if (!d.objectStoreNames.contains('pdfs')) d.createObjectStore('pdfs');   // slide PDFs, keyed by deck name
   };
   r.onsuccess = () => res(r.result);
   r.onerror = () => rej(r.error);
@@ -27,6 +29,14 @@ const tx = async (store, mode, fn) => {
 const all = s => tx(s, 'readonly', o => o.getAll());
 const putMany = (s, items) => tx(s, 'readwrite', o => items.forEach(i => o.put(i)));
 const clear = s => tx(s, 'readwrite', o => o.clear());
+const removeCards = ids => tx('cards', 'readwrite', o => ids.forEach(id => o.delete(id)));
+// slide PDFs: the bytes live in the "pdfs" store under "deck|id"; the list of files per deck lives in meta under "pdfs:deck".
+// They are NOT part of backups because they can be large.
+const pdfPut = (key, data) => tx('pdfs', 'readwrite', o => o.put(data, key));
+const pdfGet = key => tx('pdfs', 'readonly', o => o.get(key));
+const pdfDel = keys => tx('pdfs', 'readwrite', o => keys.forEach(k => o.delete(k)));
+const metaKeys = () => tx('meta', 'readonly', o => o.getAllKeys()).then(k => k || []);
+
 const getMeta = k => tx('meta', 'readonly', o => o.get(k));
 const setMeta = (k, v) => tx('meta', 'readwrite', o => o.put(v, k));
 
@@ -72,7 +82,9 @@ const folderOf = d => FM.assign[d] || (d.includes(' - ') ? d.split(' - ')[0].tri
 const lectureOf = d => { const i = d.indexOf(' - '); return i > 0 && folderOf(d) === d.slice(0, i).trim() ? d.slice(i + 3).trim() : d; };
 const allFolders = cards => [...new Set([...FM.folders, ...cards.map(c => folderOf(c.deck))])].sort((a, b) => a.localeCompare(b));
 
+let lastDeck = null;   // deck created by the most recent successful import (used to attach slides)
 async function importFile(file, folder = '') {
+  lastDeck = null;
   let d;
   try { d = JSON.parse((await file.text()).trim().replace(/^```(?:json)?\s*|\s*```$/g, '')); } catch { return 'Not valid JSON.'; }
   if (d.backup) {
@@ -89,9 +101,11 @@ async function importFile(file, folder = '') {
   const out = d.questions.map(q => {
     const id = hash(d.deck + '|' + q.stem), old = have.get(id);
     if (!old) added++;
-    return { ease: 2.5, interval: 0, due: 0, reps: 0, lapses: 0, ...old, id, deck: d.deck, stem: q.stem, options: q.options, answer: q.answer, explanation: q.explanation || '' };
+    const slide = Number.isInteger(q.slide) && q.slide > 0 ? q.slide : 0;
+    return { ease: 2.5, interval: 0, due: 0, reps: 0, lapses: 0, ...old, id, deck: d.deck, stem: q.stem, options: q.options, answer: q.answer, explanation: q.explanation || '', ...(slide ? { slide } : {}) };
   });
   await putMany('cards', out);
+  lastDeck = d.deck;
   if (folder) { FM.assign[d.deck] = folder; if (!FM.folders.includes(folder)) FM.folders.push(folder); await saveFM(); }
   return `"${d.deck}" in ${folderOf(d.deck)}: ${added} new, ${out.length - added} updated (progress kept).`;
 }
@@ -120,84 +134,87 @@ const pct = (a, b) => b ? Math.round(100 * a / b) + '%' : '-';
 const FORMAT = `Output ONLY valid JSON, no markdown fences, no commentary, in exactly this shape:
 
 {
-  "deck": "<Subject> - <Lecture title>",
+  "deck": "<Subject> - <Deck title>",
   "questions": [
     {
       "stem": "...",
       "options": ["...", "...", "...", "...", "..."],
       "answer": 2,
-      "explanation": "..."
+      "explanation": "...",
+      "slide": 12
     }
   ]
 }`;
-const COMMON = `- Use only facts from the attached lecture. Do not invent content.
+const COMMON = `- Use only facts from the attached material. Do not invent content.
 - {{COUNT}}
 - Exactly one best answer per question, with plausible distractors.
-- "answer" is the zero-based index of the correct option (0 = first option). Vary where the correct answer sits.
-- The explanation says why the answer is right and briefly why the main distractors are wrong.`;
+- "answer" is the zero-based index of the correct option (0 = first option, 4 = fifth option).
+- Spread the correct answers evenly. Across the whole set, each position (0, 1, 2, 3 and 4) must be correct about 20% of the time. AI models tend to favour the first three options, so put the correct answer in the 4th and 5th positions just as often as in the first three. Decide the position of the correct answer BEFORE writing each question, avoid patterns or runs of the same position, and do not make the correct option longer or more detailed than the distractors. Check the spread silently before you reply and rebalance if needed.
+- The explanation says why the answer is right and briefly why the main distractors are wrong.
+- If the material is a slide deck or PDF, add "slide": the number of the slide/page the question is based on (a whole number). Leave "slide" out if there is no clear one.`;
 const PROMPTS = [
-  ['Standard SBA', 'Clinical vignettes that test understanding. The best default for most lectures.',
-    `Create single-best-answer (SBA) exam questions from the attached lecture, in the style of UK medical school exams (NGU).
+  ['Standard SBA', 'Clinical vignettes that test understanding. The best default for most material.',
+    `Create single-best-answer (SBA) exam questions from the attached material, in the style of UK medical school exams (NGU).
 
 - Each question is a short clinical vignette (age, sex, presentation, key findings) followed by one question.
 - Exactly 5 options.
 - Test understanding and application, not trivial recall.
 ${COMMON}`],
   ['Quick recall', 'Short one-line questions on facts, definitions and lists. Good for first-pass memorising.',
-    `Create short single-best-answer recall questions from the attached lecture.
+    `Create short single-best-answer recall questions from the attached material.
 
 - Each stem is one or two lines: a definition, fact, classification, value or "which of the following" question. No long vignettes.
 - Exactly 5 options.
-- Cover every key fact, definition, number and list in the lecture.
+- Cover every key fact, definition, number and list in the material.
 ${COMMON}`],
   ['Mechanisms & science', 'Basic science (physiology, pathology, biochemistry) wrapped in a clinical picture.',
-    `Create single-best-answer questions from the attached lecture that test the underlying science: mechanisms, physiology, pathophysiology, biochemistry and microbiology.
+    `Create single-best-answer questions from the attached material that test the underlying science: mechanisms, physiology, pathophysiology, biochemistry and microbiology.
 
 - Each question is a short clinical vignette, and the question asks WHY it happens (the mechanism, cause or underlying process), not just what it is.
 - Exactly 5 options.
 ${COMMON}`],
   ['Pharmacology', 'Drug class, mechanism, indications, side effects, interactions and contraindications.',
-    `Create single-best-answer pharmacology questions from the attached lecture.
+    `Create single-best-answer pharmacology questions from the attached material.
 
-- Cover drug classes, mechanisms of action, indications, adverse effects, interactions, contraindications, monitoring and key doses where the lecture gives them.
+- Cover drug classes, mechanisms of action, indications, adverse effects, interactions, contraindications, monitoring and key doses where the material gives them.
 - Use short clinical vignettes where possible (for example "which drug is most appropriate" or "which adverse effect would you expect").
 - Exactly 5 options.
 ${COMMON}`],
   ['Investigations & management', 'Next best step, first-line treatment, and which test to order.',
-    `Create single-best-answer questions from the attached lecture on diagnosis and management.
+    `Create single-best-answer questions from the attached material on diagnosis and management.
 
 - Each question is a clinical vignette ending in a question such as "What is the most appropriate next investigation?", "What is the most likely diagnosis?" or "What is the first-line management?".
-- Follow UK practice (NICE guidance) when the lecture does.
+- Follow UK practice (NICE guidance) when the material does.
 - Exactly 5 options.
 ${COMMON}`],
   ['Anatomy', 'Clinical anatomy: relations, nerve and vessel supply, and injuries.',
-    `Create single-best-answer anatomy questions from the attached lecture.
+    `Create single-best-answer anatomy questions from the attached material.
 
 - Test relations, innervation, blood supply, lymphatic drainage, surface anatomy and the clinical effects of injury or disease.
 - Use short clinical vignettes (for example a nerve injury or an occluded vessel) rather than bare labelling.
 - Exactly 5 options.
 ${COMMON}`],
   ['Interpret the data', 'Lab results, ABGs, ECG and imaging findings described in text.',
-    `Create single-best-answer data-interpretation questions from the attached lecture.
+    `Create single-best-answer data-interpretation questions from the attached material.
 
 - Each stem gives a short case plus results written as text (blood tests with units and reference ranges, ABG, ECG description, imaging report, observations). The question asks for the diagnosis, cause or next step.
 - Do not rely on images.
 - Exactly 5 options.
 ${COMMON}`],
   ['Hard (exam level)', 'Multi-step reasoning with very similar options. For when the basics are solid.',
-    `Create difficult single-best-answer questions from the attached lecture, harder than a typical exam.
+    `Create difficult single-best-answer questions from the attached material, harder than a typical exam.
 
 - Each question needs two or more reasoning steps (for example work out the diagnosis, then choose the treatment or complication).
 - Distractors must all be reasonable and differ only subtly. Avoid giveaway wording.
 - Exactly 5 options.
 ${COMMON}`],
 ];
-// question count for generated decks: 0 = as many as the lecture needs
+// question count for generated decks: 0 = as many as the material needs
 let qCount = 0;
 try { qCount = +localStorage.getItem('qcount') || 0; } catch {}
 const countLine = () => qCount
-  ? `Write exactly ${qCount} question${qCount === 1 ? '' : 's'}, spread across the whole lecture, prioritising the most important and most examinable points.`
-  : 'Write as many questions as it takes to cover every testable point in the lecture. Do not stop at a fixed number.';
+  ? `Write exactly ${qCount} question${qCount === 1 ? '' : 's'}, spread across the whole material, prioritising the most important and most examinable points.`
+  : 'Write as many questions as it takes to cover every testable point in the material. Do not stop at a fixed number.';
 const promptText = i => PROMPTS[i][2].replace('{{COUNT}}', countLine()) + '\n\n' + FORMAT;
 let pi = 0;
 
@@ -285,7 +302,7 @@ function countUp(el) {                                     // "12 days" -> count
   const to = +m[1], tail = m[2], t0 = performance.now();
   if (to < 2) return;
   const f = t => {
-    const p = Math.min(1, (t - t0) / 800);
+    const p = Math.max(0, Math.min(1, (t - t0) / 800));   // rAF timestamps can be a hair earlier than t0
     el.textContent = Math.round(to * (1 - Math.pow(1 - p, 3))) + tail;
     if (p < 1) requestAnimationFrame(f);
   };
@@ -294,7 +311,7 @@ function countUp(el) {                                     // "12 days" -> count
 let lastScreen = null;   // so re-rendering the same screen (e.g. changing a setting) doesn't replay the entrance
 
 // ---- shell / nav ----
-let view = 'today', min = false, folder = null;
+let view = 'today', min = false, folder = null, editing = false;
 try { min = localStorage.getItem('navmin') === '1'; } catch {}
 const ICONS = {
   today: '<path d="M12 6.5C10.5 5 8 4.5 4 4.5v13c4 0 6.5.5 8 2 1.5-1.5 4-2 8-2v-13c-4 0-6.5.5-8 2zM12 6.5v13"/>',
@@ -330,12 +347,161 @@ function renderNav() {
     + [['today', 'Study'], ['folders', 'Folders'], ['decks', 'Decks'], ['stats', 'Stats'], ['data', 'Data', 'wo'], ['guide', 'Guide', 'wo'], ['settings', 'Settings', 'wo']].map(([v, l, c = '']) => `<button class="nv ${c} ${v === view ? 'on' : ''}" data-v="${v}" title="${l}">${svg(ICONS[v])}<span>${l}</span></button>`).join('')
     + `<button class="nv more ${['more', 'data', 'guide', 'settings'].includes(view) ? 'on' : ''}" data-v="more" title="More">${svg(ICONS.more)}<span>More</span></button>`
     + `<button class="nv tog" id="tog" title="${min ? 'Expand' : 'Minimize'}">${svg(ICONS.chev)}<span>Minimize</span></button>`;
-  nav.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { view = b.dataset.v; if (view === 'today') folder = null; home(); });
+  nav.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { view = b.dataset.v; editing = false; if (view === 'today') folder = null; home(); });
   nav.querySelector('#tog').onclick = () => { min = !min; try { localStorage.setItem('navmin', min ? '1' : '0'); } catch {} renderNav(); };
 }
 
 // ---- folders: "Subject - Lecture" decks are grouped by the part before the dash ----
 const folderSvg = n => `<svg viewBox="0 0 64 64" width="${n}" height="${n}"><path style="fill:var(--acc-d)" d="M6 16a5 5 0 0 1 5-5h14l6 7h22a5 5 0 0 1 5 5v26a5 5 0 0 1-5 5H11a5 5 0 0 1-5-5z"/><path style="fill:var(--acc)" d="M6 27a5 5 0 0 1 5-5h42a5 5 0 0 1 5 5v20a5 5 0 0 1-5 5H11a5 5 0 0 1-5-5z"/></svg>`;
+
+// ---- slide PDFs per deck (up to 50 each) ----
+const MAX_PDFS = 50, MAX_PDF = 150 * 1024 * 1024;
+const TRASH_PATH = '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>';
+const pdfList = async deck => (await getMeta('pdfs:' + deck)) || [];
+const pdfKey = (deck, id) => deck + '|' + id;
+async function pdfCounts() {                                  // Map of deck -> number of PDFs attached
+  const m = new Map();
+  for (const k of (await metaKeys()).filter(k => typeof k === 'string' && k.startsWith('pdfs:'))) {
+    const l = await getMeta(k);
+    if (l && l.length) m.set(k.slice(5), l.length);
+  }
+  return m;
+}
+async function removePdf(deck, id) {
+  await pdfDel([pdfKey(deck, id)]);
+  await setMeta('pdfs:' + deck, (await pdfList(deck)).filter(p => p.id !== id));
+}
+async function removeDeckPdfs(deck) {
+  const l = await pdfList(deck);
+  if (!l.length) return;
+  await pdfDel(l.map(p => pdfKey(deck, p.id)));
+  await setMeta('pdfs:' + deck, []);
+}
+async function attachSlides(deck, files) {
+  const notes = []; let added = 0;
+  for (const f of [...files]) {
+    const list = await pdfList(deck);
+    if (list.length >= MAX_PDFS) { notes.push(`A deck can hold up to ${MAX_PDFS} PDFs.`); break; }
+    if (f.size > MAX_PDF) { notes.push(`"${f.name}" is over 150 MB, so it was skipped.`); continue; }
+    try {
+      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+      await pdfPut(pdfKey(deck, id), await f.arrayBuffer());
+      await setMeta('pdfs:' + deck, [...list, { id, name: f.name, size: f.size }]);
+      added++;
+    } catch { notes.push("Couldn't save the slides on this device (storage may be full)."); break; }
+  }
+  return [added ? `Attached ${added} PDF${added === 1 ? '' : 's'} to "${lectureOf(deck)}".` : '', ...notes].filter(Boolean).join(' ');
+}
+
+// ---- slide viewer: renders one slide at a time with PDF.js (bundled, so it works offline) ----
+const slidesIco = () => svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5"/>', 18);
+let pdfjsReady;
+const loadPdfjs = () => pdfjsReady ||= new Promise((res, rej) => {
+  const el = document.createElement('script');
+  el.src = 'pdf.min.js';
+  el.onload = () => { pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js'; res(); };
+  el.onerror = () => { pdfjsReady = null; rej(new Error('viewer')); };
+  document.head.appendChild(el);
+});
+async function openSlides(deck, page = 1, id = null) {
+  const list = await pdfList(deck), meta = list.find(p => p.id === id) || list[0];
+  if (!meta) { slidesSheet(deck, page); return; }
+  const data = await pdfGet(pdfKey(deck, meta.id));
+  if (!data) return;
+  const o = document.createElement('div');
+  o.className = 'pdfv';
+  o.innerHTML = `<div class="pbar"><button class="x" id="pc" aria-label="Close">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 28)}</button>
+      <div class="ptitle">${esc(meta.name.replace(/\.pdf$/i, ''))}</div><button class="pbtn" id="pmg">${list.length > 1 ? 'All slides' : 'Manage'}</button></div>
+    <div class="pstage"><canvas id="pcv"></canvas><div class="pmsg" id="pm">Opening slides…</div></div>
+    <div class="pnav"><button id="pp" aria-label="Previous slide">‹</button><span id="pn">–</span><button id="pnx" aria-label="Next slide">›</button></div>`;
+  document.body.appendChild(o);
+  const q = s => o.querySelector(s);
+  let doc, cur = 1, tok = 0, task;
+  const onKey = e => {
+    e.stopImmediatePropagation();
+    if (e.key === 'Escape') close(); else if (e.key === 'ArrowRight' || e.key === ' ') go(1); else if (e.key === 'ArrowLeft') go(-1);
+  };
+  const close = () => { document.removeEventListener('keydown', onKey, true); removeEventListener('resize', draw); task?.cancel?.(); o.remove(); doc?.destroy?.(); };
+  document.addEventListener('keydown', onKey, true);
+  q('#pc').onclick = close;
+  q('#pmg').onclick = () => { close(); slidesSheet(deck, page); };
+  async function draw() {
+    if (!doc) return;
+    const my = ++tok, pg = await doc.getPage(cur), stage = q('.pstage');
+    if (my !== tok) return;
+    const base = pg.getViewport({ scale: 1 });
+    const fit = Math.max(.1, Math.min((stage.clientWidth - 24) / base.width, (stage.clientHeight - 24) / base.height));
+    const dpr = Math.min(devicePixelRatio || 1, 2.5), vp = pg.getViewport({ scale: fit * dpr }), cv = q('#pcv');
+    cv.width = vp.width; cv.height = vp.height; cv.style.width = vp.width / dpr + 'px'; cv.style.height = vp.height / dpr + 'px';
+    task?.cancel?.();
+    task = pg.render({ canvasContext: cv.getContext('2d'), viewport: vp });
+    await task.promise.catch(() => {});
+    if (my === tok) { q('#pn').textContent = `${cur} / ${doc.numPages}`; q('#pm').hidden = true; }
+  }
+  function go(d) { const n = Math.min(doc.numPages, Math.max(1, cur + d)); if (n !== cur) { cur = n; draw(); } }
+  q('#pp').onclick = () => go(-1);
+  q('#pnx').onclick = () => go(1);
+  let x0 = null;
+  q('.pstage').addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+  q('.pstage').addEventListener('touchend', e => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1); }, { passive: true });
+  addEventListener('resize', draw);
+  try {
+    await loadPdfjs();
+    doc = await pdfjsLib.getDocument({ data: new Uint8Array(data.slice(0)) }).promise;
+    cur = Math.min(doc.numPages, Math.max(1, page));
+    await draw();
+  } catch {
+    q('#pm').textContent = "Couldn't open these slides. Try removing it and adding the PDF again.";
+  }
+}
+let pendingSlides = null, sheetPage = 1, sheetClose = null;
+const pdfPick = document.createElement('input');
+pdfPick.type = 'file'; pdfPick.accept = 'application/pdf,.pdf'; pdfPick.multiple = true; pdfPick.hidden = true;
+document.body.appendChild(pdfPick);
+const refreshPage = () => document.body.classList.contains('studying') ? Promise.resolve() : home();
+pdfPick.onchange = async () => {
+  const files = [...pdfPick.files], d = pendingSlides; pdfPick.value = '';
+  if (!files.length || !d) return;
+  const note = await attachSlides(d, files);
+  sheetClose?.();
+  await refreshPage();
+  slidesSheet(d, sheetPage, note);
+};
+// the list of PDFs on a deck: view, remove, add more
+async function slidesSheet(deck, page = 1, note = '') {
+  const list = await pdfList(deck);
+  const mb = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
+  modal(`<h2>Slides</h2><p>${esc(lectureOf(deck))} · ${list.length} of ${MAX_PDFS} PDFs${page > 1 ? ` · opens at slide ${page}` : ''}</p>
+    ${note ? `<p class="snote">${esc(note)}</p>` : ''}
+    <div class="plist">${list.length ? list.map(p => `<div class="prow"><button class="pview" data-v="${p.id}">${slidesIco()}<span class="pn1">${esc(p.name)}</span><small>${mb(p.size)}</small></button><button class="prm" data-rm="${p.id}" aria-label="Remove ${esc(p.name)}">${svg(TRASH_PATH, 20)}</button></div>`).join('') : '<p class="pempty">No slides yet. Add the PDF (or PDFs) the questions came from.</p>'}</div>
+    <div class="row end"><button id="c">Close</button><button class="p" id="addp" ${list.length >= MAX_PDFS ? 'disabled' : ''}>Add PDFs</button></div>`, (o, close) => {
+    sheetClose = close;
+    o.querySelector('#c').onclick = close;
+    o.querySelector('#addp').onclick = () => { pendingSlides = deck; sheetPage = page; pdfPick.click(); };
+    o.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { close(); openSlides(deck, page, b.dataset.v); });
+    o.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
+      const p = list.find(x => x.id === b.dataset.rm);
+      confirmDialog('Remove these slides?', `"${p.name}" is deleted from this device. Your questions stay.`, 'Remove', async () => {
+        await removePdf(deck, p.id); close(); await refreshPage(); slidesSheet(deck, page);
+      });
+    });
+  });
+}
+
+// ---- deleting (progress history in the logs is kept, so streaks and totals survive) ----
+async function deleteDeck(d) {
+  await removeCards((await all('cards')).filter(c => c.deck === d).map(c => c.id));
+  await removeDeckPdfs(d);
+  delete FM.assign[d]; await saveFM();
+}
+async function deleteFolder(f) {
+  const inF = (await all('cards')).filter(c => folderOf(c.deck) === f);
+  await removeCards(inF.map(c => c.id));
+  for (const d of new Set(inF.map(c => c.deck))) await removeDeckPdfs(d);
+  FM.folders = FM.folders.filter(x => x !== f);
+  for (const k of Object.keys(FM.assign)) if (FM.assign[k] === f) delete FM.assign[k];
+  await saveFM();
+}
 
 // ---- dialogs ----
 function modal(html, bind) {
@@ -347,6 +513,12 @@ function modal(html, bind) {
   o.onclick = e => { if (e.target === o) close(); };
   bind(o, close);
   o.querySelector('input:not([hidden]),select')?.focus();
+}
+function confirmDialog(title, text, yes, onYes) {
+  modal(`<h2>${esc(title)}</h2><p>${esc(text)}</p><div class="row end"><button id="c">Cancel</button><button class="danger" id="ok">${esc(yes)}</button></div>`, (o, close) => {
+    o.querySelector('#c').onclick = close;
+    o.querySelector('#ok').onclick = async () => { close(); await onYes(); };
+  });
 }
 function newFolderDialog(done) {
   modal(`<h2>New folder</h2><p>Folders group your decks, for example by subject.</p>
@@ -365,13 +537,16 @@ function newFolderDialog(done) {
 }
 async function importDialog(pre = '') {
   const folders = allFolders(await all('cards'));
-  modal(`<h2>Add a deck</h2><p>Choose the folder it goes in, then pick the file Claude made.</p>
+  modal(`<h2>Add a deck</h2><p>Choose the folder it goes in, then pick the file the AI made.</p>
     <select class="inp" id="fs"><option value="">Auto (from the deck name)</option>${folders.map(f => `<option value="${esc(f)}" ${f === pre ? 'selected' : ''}>${esc(f)}</option>`).join('')}<option value="__new">+ New folder…</option></select>
     <input class="inp" id="fn" maxlength="40" placeholder="New folder name" hidden>
-    <div class="row end"><button id="c">Cancel</button><label class="btn p">Choose file<input type="file" id="fi" accept=".json,application/json" hidden></label></div><p class="err" id="er"></p>`, (o, close) => {
+    <label class="btn pickpdf">${svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5"/>', 20)} Attach slides (PDFs)<input type="file" id="pf" accept="application/pdf,.pdf" multiple hidden></label>
+    <p class="pname" id="pname">Optional: the slides or PDFs the questions came from.</p>
+    <div class="row end"><button id="c">Cancel</button><label class="btn p">Choose deck file<input type="file" id="fi" accept=".json,application/json" hidden></label></div><p class="err" id="er"></p>`, (o, close) => {
     const q = s => o.querySelector(s);
     q('#fs').onchange = () => { q('#fn').hidden = q('#fs').value !== '__new'; if (!q('#fn').hidden) q('#fn').focus(); };
     q('#c').onclick = close;
+    q('#pf').onchange = () => { const fs = [...q('#pf').files]; q('#pname').textContent = !fs.length ? 'Optional: the slides or PDFs the questions came from.' : fs.length === 1 ? `${fs[0].name} (${(fs[0].size / 1048576).toFixed(1)} MB)` : `${fs.length} PDFs selected`; };
     q('#fi').onchange = async e => {
       const f = e.target.files[0]; if (!f) return;
       let folder = q('#fs').value;
@@ -380,8 +555,11 @@ async function importDialog(pre = '') {
         if (!folder) { q('#er').textContent = 'Type a name for the new folder first.'; e.target.value = ''; return; }
         folder = folders.find(x => x.toLowerCase() === folder.toLowerCase()) || folder;
       }
+      const pdfs = [...q('#pf').files];
       close();
-      home(await importFile(f, folder));
+      let msg = await importFile(f, folder);
+      if (pdfs.length && lastDeck) msg += ' ' + await attachSlides(lastDeck, pdfs);
+      home(msg);
     };
   });
 }
@@ -392,7 +570,7 @@ async function home(msg = '') {
   document.body.classList.remove('studying');
   renderNav();
   await loadFM();
-  const [cards, logs, last] = await Promise.all([all('cards'), all('logs'), getMeta('lastBackup')]);
+  const [cards, logs, last, pdfN] = await Promise.all([all('cards'), all('logs'), getMeta('lastBackup'), pdfCounts()]);
   const now = Date.now(), today = dayKey(now);
   const dueN = cards.filter(c => c.reps && c.due <= now).length;
   const newN = cards.filter(c => !c.reps).length;
@@ -402,13 +580,17 @@ async function home(msg = '') {
     ${msg ? `<div class="msg ${/failed|valid JSON/.test(msg) ? 'err' : ''}">${esc(msg)}</div>` : ''}`;
   const tile = (v, l) => `<div><b>${v}</b><span>${l}</span></div>`;
   const todoOf = cs => cs.filter(c => !c.reps || c.due <= now).length;
+  const trash = svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>', 20);
+  const delBadge = (attr, v) => editing ? `<span class="del" data-${attr}="${esc(v)}" role="button" aria-label="Delete">${trash}</span>` : '';
+  const editBtn = `<button class="edit${editing ? ' on' : ''}" data-act="edit">${editing ? 'Done' : 'Edit'}</button>`;
+  const slidesChip = d => { const n = pdfN.get(d) || 0; return editing ? '' : `<span class="sl${n ? ' on' : ''}" role="button" data-slides="${esc(d)}" data-n="${n}" aria-label="Slides">${slidesIco()}${n > 1 ? 'Slides · ' + n : n ? 'Slides' : '+ Slides'}</span>`; };
   const deckCard = (d, withFolder) => {
     const cs = cards.filter(c => c.deck === d), n = cs.length, todo = todoOf(cs), mat = cs.filter(c => c.interval >= 21).length;
-    return `<button class="deckcard" data-deck="${esc(d)}" ${todo ? '' : 'data-practice="1"'}>
+    return `<button class="deckcard${editing ? ' editing' : ''}" data-deck="${esc(d)}" ${todo ? '' : 'data-practice="1"'}>${delBadge('deldeck', d)}
       ${withFolder ? `<span class="fl">${folderSvg(18)}${esc(folderOf(d))}</span>` : ''}<span class="dn">${esc(lectureOf(d))}</span>
       <span class="dm"><small>${n} question${n === 1 ? '' : 's'}</small>${todo ? `<b class="due">${todo} to do</b>` : '<b class="due done">All done</b>'}</span>
       <span class="bar2"><i style="width:${Math.round(100 * mat / n)}%"></i></span>
-      <span class="go">${todo ? 'Study' : 'Practice'} ›</span></button>`;
+      <span class="dfoot">${slidesChip(d)}<span class="go">${todo ? 'Study' : 'Practice'} ›</span></span></button>`;
   };
   let body = '';
 
@@ -416,6 +598,7 @@ async function home(msg = '') {
     const decks = [...new Set(cards.map(c => c.deck))].sort();
         const hp = (k, col, v, t) => `<span class="hp" style="color:${col}" title="${t}">${fsvg(k, 'currentColor', 46)}${v}</span>`;
     if (folder && !allFolders(cards).includes(folder)) folder = null;
+    if (!folder) editing = false;
     const scope = folder ? cards.filter(c => folderOf(c.deck) === folder) : cards;
     const sDue = scope.filter(c => c.reps && c.due <= now).length, sNew = scope.filter(c => !c.reps).length;
     const left = folder ? 'in this folder' : '';
@@ -429,11 +612,11 @@ async function home(msg = '') {
     } else if (!cards.length && !FM.folders.length) list = '<p class="tag emptynote">No decks yet. Open the Folders or Decks tab and tap + to add one.</p>';
     else list = `<h2>Folders</h2><div class="folders">${allFolders(cards).map(f => {
       const cs = cards.filter(c => folderOf(c.deck) === f), nd = new Set(cs.map(c => c.deck)).size, todo = todoOf(cs), mat = cs.filter(c => c.interval >= 21).length;
-      return `<button class="folder" data-folder="${esc(f)}"><span class="fic">${folderSvg(64)}</span>
+      return `<button class="folder${editing ? ' editing' : ''}" data-folder="${esc(f)}">${delBadge('delfolder', f)}<span class="fic">${folderSvg(64)}</span>
         <span class="ftx"><span class="nm">${esc(f)}</span><small>${nd} deck${nd === 1 ? '' : 's'} · ${cs.length} questions</small><span class="bar2"><i style="width:${cs.length ? Math.round(100 * mat / cs.length) : 0}%"></i></span></span>${todo ? `<b class="badge2">${todo}</b>` : ''}</button>`;
     }).join('')}</div>`;
     body = `<div class="toprow"><div>${head}</div>
-      <div class="hud">${hp('flame', '#ff9600', streak(logs), 'day streak')}</div></div>
+      <div class="hud">${hp('flame', '#ff9600', streak(logs), 'day streak')}${folder && scope.length ? editBtn : ''}</div></div>
     ${banner}
     <section class="hero">
       <div><span class="big">${sDue + sNew}</span><span class="lbl">${sDue + sNew || !scope.length ? 'to study today' : 'all done for today'} ${left}</span><div class="sub">${sDue} due · ${sNew} new · ${streak(logs)} day streak</div></div>
@@ -447,15 +630,15 @@ async function home(msg = '') {
   } else if (view === 'decks') {
     const names = [...new Set(cards.map(c => c.deck))].sort((a, b) => folderOf(a).localeCompare(folderOf(b)) || a.localeCompare(b));
     body = `<div class="toprow"><div><h1 class="pt">All decks</h1><p class="tag">${names.length ? names.length + ' deck' + (names.length === 1 ? '' : 's') + ' · tap one to study it' : 'tap + to add your first deck'}</p></div>
-      <button class="p plus" data-act="adddeck" aria-label="Add deck">${svg('<path d="M12 5v14M5 12h14"/>', 30)}</button></div>${banner}
+      <div class="tbtns">${names.length ? editBtn : ''}<button class="p plus" data-act="adddeck" aria-label="Add deck">${svg('<path d="M12 5v14M5 12h14"/>', 30)}</button></div></div>${banner}
     <div class="deckgrid">${names.map(d => deckCard(d, true)).join('')}<button class="addtile" data-act="adddeck">${svg('<path d="M12 5v14M5 12h14"/>', 44)}<span>Add deck</span></button></div>`;
   } else if (view === 'folders') {
     const names = allFolders(cards);
     body = `<div class="toprow"><div><h1 class="pt">Folders</h1><p class="tag">${names.length ? 'tap a folder to open it' : 'tap + to create your first folder'}</p></div>
-      <button class="p plus" data-act="newfolder" aria-label="New folder">${svg('<path d="M12 5v14M5 12h14"/>', 30)}</button></div>${banner}
+      <div class="tbtns">${names.length ? editBtn : ''}<button class="p plus" data-act="newfolder" aria-label="New folder">${svg('<path d="M12 5v14M5 12h14"/>', 30)}</button></div></div>${banner}
     <div class="bigf">${names.map(f => {
       const cs = cards.filter(c => folderOf(c.deck) === f), nd = new Set(cs.map(c => c.deck)).size, todo = cs.filter(c => !c.reps || c.due <= now).length, mat = cs.filter(c => c.interval >= 21).length;
-      return `<button class="bf" data-folder="${esc(f)}">${todo ? `<b class="badge2">${todo}</b>` : ''}${folderSvg(132)}
+      return `<button class="bf${editing ? ' editing' : ''}" data-folder="${esc(f)}">${delBadge('delfolder', f)}${todo ? `<b class="badge2">${todo}</b>` : ''}${folderSvg(132)}
         <span class="nm">${esc(f)}</span><small>${nd} deck${nd === 1 ? '' : 's'} · ${cs.length} questions</small><span class="bar2"><i style="width:${cs.length ? Math.round(100 * mat / cs.length) : 0}%"></i></span></button>`;
     }).join('')}<button class="addtile" data-act="newfolder">${svg('<path d="M12 5v14M5 12h14"/>', 44)}<span>New folder</span></button></div>`;
   } else if (view === 'stats') {
@@ -483,7 +666,8 @@ async function home(msg = '') {
     const fc = Array(7).fill(0);
     cards.filter(c => c.reps).forEach(c => { fc[Math.min(6, Math.max(0, Math.floor((c.due - now) / DAY)))]++; });
     const fmax = Math.max(1, ...fc), dn = i => ['Today', 'Tmrw'][i] || 'SMTWTFS'[new Date(now + i * DAY).getDay()];
-    const weak = [...byDeck].filter(([, v]) => v.n >= 5).map(([d, v]) => ({ d, n: v.n, acc: Math.round(100 * v.ok / v.n) })).sort((a, b) => a.acc - b.acc).slice(0, 4);
+    const live = new Set(cards.map(c => c.deck));
+    const weak = [...byDeck].filter(([d, v]) => live.has(d) && v.n >= 5).map(([d, v]) => ({ d, n: v.n, acc: Math.round(100 * v.ok / v.n) })).sort((a, b) => a.acc - b.acc).slice(0, 4);
     const hard = cards.filter(c => c.lapses).sort((a, b) => b.lapses - a.lapses).slice(0, 4);
     const tone = a => a < 60 ? 'var(--bad)' : a < 80 ? 'var(--acc)' : 'var(--blue)';
     const TI = { bolt: ['bolt', 'var(--blue)'], flame: ['flame', '#ff9600'], star: ['star', '#ffc800'], check: ['check', 'var(--acc)'] };
@@ -514,31 +698,26 @@ async function home(msg = '') {
       : `${nC ? progress : ''}<section class="card empty"><div class="ei">${svg(ICONS.stats, 40)}</div><h3>No answers yet</h3><p>Study a few questions and your stats will show up here.</p></section>`;
     body = `<h1 class="pt">Stats</h1><p class="tag">how you're doing, and where to focus</p><div style="height:18px"></div><div class="stats">${inner}</div>`;
   } else if (view === 'guide') {
-    const step = (n, t, d) => `<div class="step"><b>${n}</b><div><strong>${t}</strong><p>${d}</p></div></div>`;
-    body = `<h1 class="pt">Guide</h1><p class="tag">from lecture to questions in five steps</p><div style="height:20px"></div>${banner}
-    <section class="card steps">
-      ${step(1, 'Get your lecture', 'Have the lecture slides or notes ready as a PDF, PowerPoint or text.')}
-      ${step(2, 'Ask an AI to write the questions', 'Open Claude (or ChatGPT) and attach the lecture. Pick a prompt type below, copy it, paste it in and send.')}
-      ${step(3, 'Save the answer as a .json file', 'Ask the AI to give the result as a downloadable file. If it only shows text, copy it into Notes or a text editor and save it with a name ending in <b>.json</b>. Code fences around it are fine.')}
-      ${step(4, 'Import it', 'Go to <b>Data</b>, tap <b>Import file</b> and pick the file from Files. A message tells you how many questions were added. Importing the same deck again keeps your progress.')}
-      ${step(5, 'Study every day', 'Go to <b>Study</b>. Pick an answer and read the explanation. A wrong answer comes back soon in the same session. For a right answer, rate it: <b>Hard</b> (shaky), <b>Good</b>, or <b>Easy</b>. The better you know it, the longer until you see it again.')}
-    </section>
-    <h2>Prompts for the AI</h2>
-    <section class="card"><p>Pick the kind of questions you want. You can import several decks from one lecture.</p>
-      <div class="chips">${PROMPTS.map(p => `<button class="chip">${esc(p[0])}</button>`).join('')}</div>
-      <p class="qlbl">How many questions?</p>
-      <div class="chips qrow">${[0, 10, 20, 30, 50].map(n => `<button class="chip qn" data-n="${n}">${n || 'As many as needed'}</button>`).join('')}
-        <input class="inp qi" id="qcustom" type="number" min="1" max="200" inputmode="numeric" placeholder="Custom" value="${[0, 10, 20, 30, 50].includes(qCount) ? '' : qCount}"></div>
-      <p id="pd" style="color:var(--fg)"></p>
-      <pre id="pr" class="prompt"></pre>
-      <button class="p" id="cp">Copy prompt</button></section>
-    <h2>Tips</h2>
-    <section class="card tips">
-      <p><b>Install it:</b> in Safari tap Share, then Add to Home Screen, and always open ankidote from that icon.</p>
-      <p><b>Back up:</b> use Data, then Export backup, and save to Files. Do it weekly. Clearing Safari data erases your progress.</p>
-      <p><b>Error on import?</b> The message says which question is wrong. Ask the AI to fix that question and give the full file again.</p>
-      <p><b>Mix it up:</b> use "Quick recall" first, then "Standard SBA" and "Hard" on the same lecture as the exam gets closer.</p>
-    </section>`;
+    const presets = [0, 10, 20, 30, 50], isCustom = !presets.includes(qCount);
+    body = `<h1 class="pt">Guide</h1><p class="tag">make a deck from your material in 3 steps</p><div style="height:18px"></div>${banner}
+    <div class="gsteps">
+      <section class="card gs"><div class="gn">1</div><div class="gb"><h3>Copy a prompt</h3>
+        <div class="gsel">
+          <label>Question type<select class="inp" id="ptype">${PROMPTS.map((p, i) => `<option value="${i}" ${i === pi ? 'selected' : ''}>${esc(p[0])}</option>`).join('')}</select></label>
+          <label>How many<select class="inp" id="qsel">${presets.map(n => `<option value="${n}" ${n === qCount ? 'selected' : ''}>${n || 'As many as needed'}</option>`).join('')}<option value="custom" ${isCustom ? 'selected' : ''}>Custom…</option></select></label>
+        </div>
+        <input class="inp" id="qcustom" type="number" min="1" max="200" inputmode="numeric" placeholder="Number of questions (1-200)" value="${isCustom ? qCount : ''}" ${isCustom ? '' : 'hidden'}>
+        <p class="gdesc" id="pd"></p>
+        <button class="p" id="cp">Copy prompt</button>
+        <details class="prev"><summary>Preview the prompt</summary><pre id="pr" class="prompt"></pre></details>
+      </div></section>
+      <section class="card gs"><div class="gn">2</div><div class="gb"><h3>Ask the AI</h3>
+        <p>Open Claude or ChatGPT, attach your slides, notes or PDF, paste the prompt and send. Save the reply as a <b>.json</b> file.</p></div></section>
+      <section class="card gs"><div class="gn">3</div><div class="gb"><h3>Import it</h3>
+        <p>Pick a folder and choose the deck file. You can also attach the slides (up to 50 PDFs per deck), so you can open them while studying. Importing the same deck again keeps your progress.</p>
+        <button class="p" data-act="adddeck">Add a deck</button></div></section>
+    </div>
+    <p class="fine">Study a little every day, and back up now and then from the Data tab.</p>`;
   } else if (view === 'settings') {
     const t = theme(), seg = (v, l) => `<button data-theme-set="${v}" class="${t === v ? 'on' : ''}">${l}</button>`;
     body = `<h1 class="pt">Settings</h1><div style="height:20px"></div>${banner}
@@ -558,7 +737,7 @@ async function home(msg = '') {
   } else {
     body = `<h1 class="pt">Data</h1><div style="height:20px"></div>${banner}
     <div class="two">
-      <section class="card"><h2 style="margin-top:0">Import</h2><p>Add a deck file made with Claude, or restore a backup. Re-importing a deck keeps your progress.</p>
+      <section class="card"><h2 style="margin-top:0">Import</h2><p>Add a deck file made by an AI, or restore a backup. Re-importing a deck keeps your progress.</p>
         <button class="p" data-act="adddeck">Import file</button></section>
       <section class="card"><h2 style="margin-top:0">Backup</h2><p>${last ? 'Last backup: ' + new Date(last).toLocaleDateString() : 'No backup yet.'} Save the file to Files or iCloud Drive.</p>
         <button id="ex">Export backup</button></section>
@@ -575,23 +754,38 @@ async function home(msg = '') {
 
   const q = s => $.querySelector(s);
   if (q('#all')) q('#all').onclick = e => { const d = e.currentTarget.dataset; study(d.folder ? { folder: d.folder } : undefined, !!d.practice); };
-  if (q('#up')) q('#up').onclick = () => { folder = null; home(); };
-  $.querySelectorAll('[data-folder]:not(#all)').forEach(b => b.onclick = () => { folder = b.dataset.folder; view = 'today'; home(); });
+  if (q('#up')) q('#up').onclick = () => { folder = null; editing = false; home(); };
+  $.querySelectorAll('[data-folder]:not(#all)').forEach(b => b.onclick = () => { if (editing) return; folder = b.dataset.folder; view = 'today'; home(); });
   $.querySelectorAll('[data-pal]').forEach(b => b.onclick = () => { setPalette(b.dataset.pal); home(); });
-  $.querySelectorAll('[data-deck]').forEach(b => b.onclick = () => study({ deck: b.dataset.deck }, !!b.dataset.practice));
+  $.querySelectorAll('[data-deck]').forEach(b => b.onclick = () => { if (editing) return; study({ deck: b.dataset.deck }, !!b.dataset.practice); });
+  $.querySelectorAll('[data-act=edit]').forEach(b => b.onclick = () => { editing = !editing; home(); });
+  $.querySelectorAll('[data-slides]').forEach(x => x.onclick = e => {
+    e.stopPropagation(); e.preventDefault();
+    const d = x.dataset.slides;
+    if (+x.dataset.n === 1) openSlides(d); else slidesSheet(d);
+  });
+  $.querySelectorAll('[data-deldeck]').forEach(x => x.onclick = e => {
+    e.stopPropagation(); e.preventDefault();
+    const d = x.dataset.deldeck, n = cards.filter(c => c.deck === d).length;
+    confirmDialog(`Delete "${lectureOf(d)}"?`, `This removes the deck and its ${n} question${n === 1 ? '' : 's'}, along with your progress on them. This can't be undone.`, 'Delete', async () => { await deleteDeck(d); home(`Deleted "${lectureOf(d)}".`); });
+  });
+  $.querySelectorAll('[data-delfolder]').forEach(x => x.onclick = e => {
+    e.stopPropagation(); e.preventDefault();
+    const f = x.dataset.delfolder, cs = cards.filter(c => folderOf(c.deck) === f), nd = new Set(cs.map(c => c.deck)).size;
+    confirmDialog(`Delete the "${f}" folder?`, nd ? `This removes the folder, its ${nd} deck${nd === 1 ? '' : 's'} and ${cs.length} question${cs.length === 1 ? '' : 's'}, along with your progress on them. This can't be undone.` : 'This folder is empty, so nothing else is removed.', 'Delete', async () => { await deleteFolder(f); if (folder === f) folder = null; home(`Deleted the "${f}" folder.`); });
+  });
   if (q('#pr')) {
-    const show = i => {
-      pi = i;
-      q('#pr').textContent = promptText(i);
-      q('#pd').textContent = PROMPTS[i][1];
-      $.querySelectorAll('.chip:not(.qn)').forEach((c, j) => c.classList.toggle('on', j === i));
-      $.querySelectorAll('.qn').forEach(c => c.classList.toggle('on', +c.dataset.n === qCount));
+    const show = () => { q('#pr').textContent = promptText(pi); q('#pd').textContent = PROMPTS[pi][1]; };
+    const setCount = n => { qCount = n; try { localStorage.setItem('qcount', n); } catch {} show(); };
+    q('#ptype').onchange = e => { pi = +e.target.value; show(); };
+    q('#qsel').onchange = e => {
+      const custom = e.target.value === 'custom';
+      q('#qcustom').hidden = !custom;
+      if (custom) { q('#qcustom').focus(); setCount(Math.min(200, Math.max(1, Math.floor(+q('#qcustom').value) || 20))); q('#qcustom').value = qCount; }
+      else { q('#qcustom').value = ''; setCount(+e.target.value); }
     };
-    $.querySelectorAll('.chip:not(.qn)').forEach((c, j) => c.onclick = () => show(j));
-    const setCount = n => { qCount = n; try { localStorage.setItem('qcount', n); } catch {} show(pi); };
-    $.querySelectorAll('.qn').forEach(c => c.onclick = () => { q('#qcustom').value = ''; setCount(+c.dataset.n); });
-    q('#qcustom').oninput = e => setCount(Math.min(200, Math.max(0, Math.floor(+e.target.value) || 0)));
-    show(pi);
+    q('#qcustom').oninput = e => setCount(Math.min(200, Math.max(1, Math.floor(+e.target.value) || 1)));
+    show();
   }
   if (q('#cp')) q('#cp').onclick = async e => {
     try { await navigator.clipboard.writeText(promptText(pi)); } catch { const r = document.createRange(); r.selectNodeContents(q('#pr')); getSelection().removeAllRanges(); getSelection().addRange(r); document.execCommand('copy'); }
@@ -618,7 +812,7 @@ async function home(msg = '') {
 // practice = review everything now; never touches the schedule or stats
 async function study(sel, practice = false) {
   document.body.classList.add('studying');
-  const [cards, logs] = await Promise.all([all('cards'), all('logs')]);
+  const [cards, logs, pdfN] = await Promise.all([all('cards'), all('logs'), pdfCounts()]);
   const now = Date.now(), pool = sel?.deck ? cards.filter(c => c.deck === sel.deck) : sel?.folder ? cards.filter(c => folderOf(c.deck) === sel.folder) : cards;
   const queue = practice ? pool.map(c => ({ ...c })).sort(() => Math.random() - .5) : [
     ...pool.filter(c => c.reps && c.due <= now).sort((a, b) => a.due - b.due),
@@ -675,10 +869,13 @@ async function study(sel, practice = false) {
         <div class="fbh"><span class="fbi">${svg(correct ? '<path d="m5 12.500 4.500 4.500L19 7.500"/>' : '<path d="M6 6l12 12M18 6 6 18"/>')}</span>
           <div><strong>${correct ? praise : 'Not quite'}</strong>${correct ? '' : `<small>Correct answer: ${'ABCDEFGH'[c.answer] || c.answer + 1}. ${esc(c.options[c.answer])}</small>`}</div></div>
         ${c.explanation ? `<p class="fbe">${esc(c.explanation)}</p>` : ''}
+        ${pdfN.get(c.deck) ? `<button class="slbtn" data-slide="${c.slide || 1}">${slidesIco()} ${c.slide ? 'View slide ' + c.slide : 'View slides'}</button>` : ''}
         <div class="row rate">${correct && !practice
           ? ['hard', 'good', 'easy'].map(r => `<button data-r="${r}" ${r === 'good' ? 'class="p"' : ''}>${r}</button>`).join('')
           : `<button data-r="again" class="p">${correct ? 'Continue' : 'Next'}</button>`}</div>
         ${practice && !correct ? '<p class="hint">Missed ones come back until you get them right.</p>' : ''}</div>`;
+      const sb = $.querySelector('.slbtn');
+      if (sb) sb.onclick = () => pdfN.get(c.deck) === 1 ? openSlides(c.deck, +sb.dataset.slide) : slidesSheet(c.deck, +sb.dataset.slide);
       $.querySelector('.fb').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       $.querySelectorAll('[data-r]').forEach(x => x.onclick = () => rate(x.dataset.r));
     });
