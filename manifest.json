@@ -3,7 +3,7 @@
   "short_name": "ankidote",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#f6f4ef",
-  "theme_color": "#f6f4ef",
+  "background_color": "#fff6f9",
+  "theme_color": "#fff6f9",
   "icons": [{ "src": "icon.png", "sizes": "180x180", "type": "image/png" }]
 }
