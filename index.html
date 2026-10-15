@@ -378,6 +378,60 @@ body{position:fixed;inset:0;width:100%;height:100%;overflow:hidden;overscroll-be
 nav{height:100%}
 main{height:100%;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
 @media(max-width:699px){.shell{display:block;height:100%}nav{height:auto}}
+/* ---- motion ---- */
+@keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
+@keyframes pop{0%{opacity:0;transform:scale(.6)}70%{transform:scale(1.08)}100%{opacity:1;transform:scale(1)}}
+@keyframes ease{from{opacity:0;transform:scale(.94) translateY(10px)}to{opacity:1;transform:none}}
+@keyframes sheetup{from{opacity:0;transform:translateY(46px)}to{opacity:1;transform:none}}
+@keyframes fade{from{opacity:0}to{opacity:1}}
+@keyframes shake{0%,100%{transform:translateX(0)}18%{transform:translateX(-9px)}36%{transform:translateX(8px)}54%{transform:translateX(-6px)}72%{transform:translateX(4px)}}
+@keyframes bump{0%{transform:scale(1)}35%{transform:scale(1.05)}100%{transform:scale(1)}}
+@keyframes flame{0%,100%{transform:scale(1) rotate(-4deg)}50%{transform:scale(1.14) rotate(4deg)}}
+@keyframes growx{from{transform:scaleX(0)}to{transform:scaleX(1)}}
+@keyframes growy{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+.fx{position:fixed;inset:0;pointer-events:none;z-index:60}
+.page:not(.study)>*{animation:rise .5s cubic-bezier(.2,.7,.2,1) backwards}
+.folders>*,.bigf>*,.deckgrid>*,.grid>*,.two>*,.morelist>*{animation:ease .5s cubic-bezier(.2,.7,.2,1) backwards}
+.stats>.card,.stats>.two{animation:rise .55s cubic-bezier(.2,.7,.2,1) backwards}
+.stats>*:nth-child(2){animation-delay:.08s}.stats>*:nth-child(3){animation-delay:.16s}.stats>*:nth-child(4){animation-delay:.24s}.stats>*:nth-child(5){animation-delay:.32s}
+.page.still,.page.still *{animation:none!important}
+.hp svg{animation:flame 1.7s ease-in-out infinite;transform-origin:50% 85%}
+.badge,.badge2{animation:pop .5s .35s backwards}
+.nv.on svg{animation:pop .35s backwards}
+.nv{transition:background .2s,color .2s,border-color .2s}
+.stack i,.bar2 i,.meter i{transform-origin:left;animation:growx .9s .25s cubic-bezier(.2,.7,.2,1) backwards}
+.act i,.fc i{transform-origin:bottom;animation:growy .7s var(--d,0ms) cubic-bezier(.2,.7,.2,1) backwards}
+.msg,.banner{animation:pop .45s backwards}
+.ovl{animation:fade .2s backwards}
+.sheet{animation:pop .3s backwards}
+/* study */
+.sbar,.kick,.qh,.stem{animation:rise .4s cubic-bezier(.2,.7,.2,1) backwards}
+.qh{animation-delay:.04s}.stem{animation-delay:.08s}
+.opt{animation:rise .4s cubic-bezier(.2,.7,.2,1) backwards}
+.opt:nth-child(1){animation-delay:.12s}.opt:nth-child(2){animation-delay:.17s}.opt:nth-child(3){animation-delay:.22s}.opt:nth-child(4){animation-delay:.27s}.opt:nth-child(5){animation-delay:.32s}.opt:nth-child(6){animation-delay:.37s}
+.opt.ok{animation:bump .5s backwards}
+.opt.no{animation:shake .45s backwards}
+.fb{animation:sheetup .38s cubic-bezier(.2,.8,.2,1) backwards}
+.fbi{animation:pop .45s .1s backwards}
+.prog i{transition:width .6s cubic-bezier(.2,.8,.2,1)}
+@media(max-width:699px){.sheet{animation:sheetup .32s cubic-bezier(.2,.8,.2,1) backwards}}
+@media(hover:hover) and (pointer:fine){
+.folder,.bf,.deckcard,.morerow,.addtile{transition:transform .18s cubic-bezier(.2,.7,.2,1),box-shadow .18s}
+.folder:hover,.bf:hover,.morerow:hover{transform:translateY(-4px)}
+.deckcard:hover{transform:translateY(-4px)}
+.addtile:hover{transform:translateY(-3px);border-color:var(--acc);color:var(--acc)}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{animation:none!important;transition:none!important}}
+/* study: the progress bar stays pinned to the top of the screen while the question scrolls */
+body.studying main{padding-top:0}
+.sbar{position:sticky;top:0;z-index:8;background:var(--bg);margin:0 -6px 18px;padding:max(18px,env(safe-area-inset-top)) 6px 12px}
+@media(min-width:700px){.sbar{padding-top:32px}}
+/* settings rows: breathing room at the bottom, and button pairs stay side by side on phones */
+.set:last-child{padding-bottom:20px}
+@media(max-width:699px){
+.set .row{width:100%;flex-wrap:nowrap}
+.set .row button{flex:1;min-width:0;padding:0 10px}
+}
 </style>
 </head>
 <body>

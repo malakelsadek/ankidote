@@ -254,6 +254,45 @@ async function play(kind) {
   } catch {}
 }
 
+// ---- motion helpers ----
+const calm = () => matchMedia('(prefers-reduced-motion: reduce)').matches;
+function burst(x, y, n = 26, power = 1) {                 // small confetti burst on a canvas overlay
+  if (calm()) return;
+  const c = document.createElement('canvas');
+  c.className = 'fx'; c.width = innerWidth; c.height = innerHeight;
+  document.body.appendChild(c);
+  const g = c.getContext('2d'), st = getComputedStyle(document.body);
+  const cols = ['#ffc800', st.getPropertyValue('--acc').trim() || '#d9528c', st.getPropertyValue('--blue').trim() || '#4aa3d9', '#ffffff'];
+  const ps = Array.from({ length: n }, () => ({ x, y, vx: (Math.random() - .5) * 11 * power, vy: -(Math.random() * 10 + 4) * power, r: 3 + Math.random() * 4, c: cols[Math.floor(Math.random() * cols.length)], a: Math.random() * 6, va: (Math.random() - .5) * .4, t: 0 }));
+  let last = performance.now();
+  const step = now => {
+    const k = Math.min(2, (now - last) / 16.7); last = now;
+    g.clearRect(0, 0, c.width, c.height);
+    let alive = 0;
+    for (const p of ps) {
+      p.vy += .35 * k; p.x += p.vx * k; p.y += p.vy * k; p.a += p.va * k; p.t += k;
+      if (p.t > 100 || p.y > c.height + 20) continue;
+      alive++;
+      g.save(); g.globalAlpha = 1 - p.t / 100; g.translate(p.x, p.y); g.rotate(p.a); g.fillStyle = p.c; g.fillRect(-p.r, -p.r / 2, p.r * 2, p.r); g.restore();
+    }
+    alive ? requestAnimationFrame(step) : c.remove();
+  };
+  requestAnimationFrame(step);
+}
+function countUp(el) {                                     // "12 days" -> counts the 12 up, keeps the rest
+  const m = /^(\d+)(.*)$/.exec(el.textContent.trim());
+  if (!m || calm()) return;
+  const to = +m[1], tail = m[2], t0 = performance.now();
+  if (to < 2) return;
+  const f = t => {
+    const p = Math.min(1, (t - t0) / 800);
+    el.textContent = Math.round(to * (1 - Math.pow(1 - p, 3))) + tail;
+    if (p < 1) requestAnimationFrame(f);
+  };
+  requestAnimationFrame(f);
+}
+let lastScreen = null;   // so re-rendering the same screen (e.g. changing a setting) doesn't replay the entrance
+
 // ---- shell / nav ----
 let view = 'today', min = false, folder = null;
 try { min = localStorage.getItem('navmin') === '1'; } catch {}
@@ -525,7 +564,14 @@ async function home(msg = '') {
         <button id="ex">Export backup</button></section>
     </div>`;
   }
-  $.innerHTML = `<div class="page">${body}</div>`;
+  const screen = view + '|' + folder, still = screen === lastScreen;
+  lastScreen = screen;
+  $.innerHTML = `<div class="page${still ? ' still' : ''}">${body}</div>`;
+  if (!still) {
+    $.querySelectorAll('.folders>*,.bigf>*,.deckgrid>*,.grid>*,.two>*,.morelist>*').forEach((el, i) => { el.style.animationDelay = Math.min(i, 10) * 55 + 120 + 'ms'; });
+    $.querySelectorAll('.act>div,.fc>div').forEach((el, i) => el.style.setProperty('--d', i * 45 + 200 + 'ms'));
+    $.querySelectorAll('.big,.tt b').forEach(countUp);
+  }
 
   const q = s => $.querySelector(s);
   if (q('#all')) q('#all').onclick = e => { const d = e.currentTarget.dataset; study(d.folder ? { folder: d.folder } : undefined, !!d.practice); };
@@ -578,19 +624,25 @@ async function study(sel, practice = false) {
     ...pool.filter(c => c.reps && c.due <= now).sort((a, b) => a.due - b.due),
     ...pool.filter(c => !c.reps),
   ];
+  lastScreen = null;
   const total = queue.length;
+  let prevPct = 0;
   const next = () => {
-    if (!queue.length) { play('done'); return home(`${practice ? 'Practice done' : 'Done'}. ${total} question${total === 1 ? '' : 's'} reviewed.`); };
+    if (!queue.length) { play('done'); burst(innerWidth / 2, innerHeight * .55, 150, 1.5); return home(`${practice ? 'Practice done' : 'Done'}. ${total} question${total === 1 ? '' : 's'} reviewed.`); };
     const c = queue[0], isNew = !c.reps, t0 = Date.now();
     $.innerHTML = `<div class="page study">
       <div class="sbar"><button class="x" id="back" aria-label="Close">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 28)}</button>
-        <div class="prog"><i style="width:${Math.max(0, 100 * (1 - queue.length / total))}%"></i></div><span class="cnt">${practice ? 'Practice · ' : ''}${queue.length} left</span></div>
+        <div class="prog"><i style="width:${prevPct}%"></i></div><span class="cnt">${practice ? 'Practice · ' : ''}${queue.length} left</span></div>
       <div class="kick">${isNew ? 'New question' : practice ? 'Practice' : 'Review'}</div>
       <h2 class="qh">Choose the best answer</h2>
       <p class="stem">${esc(c.stem)}</p>
       <div id="opts">${c.options.map((o, i) => `<button class="opt" data-i="${i}"><b>${'ABCDEFGH'[i] || i + 1}</b><span>${esc(o)}</span></button>`).join('')}</div>
       <p class="kbd">A–E to answer · ${practice ? 'Enter to continue' : '1 Hard · 2 Good · 3 Easy · Enter to continue'}</p>
       <div id="after"></div></div>`;
+    const pct = Math.max(0, 100 * (1 - queue.length / total));
+    const bar = $.querySelector('.prog i');
+    requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = pct + '%'; }));
+    prevPct = pct;
     $.querySelector('#back').onclick = e => { e.preventDefault(); home(); };
     onkeydown = e => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
@@ -606,6 +658,7 @@ async function study(sel, practice = false) {
     $.querySelectorAll('.opt').forEach(b => b.onclick = () => {
       const pick = +b.dataset.i, correct = pick === c.answer, ms = Date.now() - t0;
       play(correct ? 'ok' : 'no');
+      if (correct) { const r = b.getBoundingClientRect(); burst(r.left + r.width / 2, r.top + r.height / 2, 24); }
       $.querySelectorAll('.opt').forEach((x, i) => { x.disabled = true; if (i === c.answer) x.classList.add('ok'); else if (i === pick) x.classList.add('no'); });
       const rate = async rating => {
         if (practice) { queue.shift(); if (!correct) queue.push(c); return next(); }
