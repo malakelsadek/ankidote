@@ -54,7 +54,7 @@ nav.min .nv{justify-content:center;padding:0}
 nav.min .nv span{display:none}
 nav.min .brand{text-align:center;padding-left:0;padding-right:0}
 main{flex:1;min-width:0;padding:max(32px,env(safe-area-inset-top)) max(40px,env(safe-area-inset-right)) max(56px,env(safe-area-inset-bottom)) 40px}
-.page{max-width:1000px}
+.page{max-width:none}
 .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:16px}
 
 /* today */
@@ -366,6 +366,8 @@ body.studying main{padding-bottom:24px}
 .qlbl{margin:6px 0 10px!important;color:var(--fg)!important;font-weight:800;font-size:17px!important}
 .qrow{align-items:center}
 .inp.qi{width:130px;margin:0;padding:10px 14px;font-size:17px}
+/* pages fill the screen; only the question view keeps a readable line length */
+.study{max-width:780px;margin-inline:auto;width:100%}
 </style>
 </head>
 <body>
