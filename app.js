@@ -202,21 +202,36 @@ const promptText = i => PROMPTS[i][2].replace('{{COUNT}}', countLine()) + '\n\n'
 let pi = 0;
 
 // ---- settings: sound + theme ----
-let sound = true, actx;
+let sound = true, actx, keep, keepT;
 try { sound = localStorage.getItem('sound') !== '0'; } catch {}
 const theme = () => document.documentElement.dataset.theme || 'auto';
 function setTheme(v) {
   if (v === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = v;
   try { v === 'auto' ? localStorage.removeItem('theme') : localStorage.setItem('theme', v); } catch {}
 }
-// synthesized with WebAudio so there are no sound files to cache; must be called from a tap (iOS rule)
+// synthesized with WebAudio so there are no sound files to cache
 // ok = bright bell arpeggio, no = soft muffled "bonk", done = little fanfare
-function play(kind) {
+//
+// iOS quirks this works around:
+//  - an AudioContext starts suspended and only resumes from a tap, so we wait for resume() before scheduling notes
+//  - Web Audio is muted by the silent/mute setting, but a playing <audio> element is not. Playing a silent looping one
+//    (and setting the audioSession to "playback") moves the page onto the media channel so the notes are heard.
+//    It only runs for ~2s around each sound so it doesn't hold the audio session (or other apps' music) longer than needed.
+const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
+async function audioOn() {
+  actx ||= new (window.AudioContext || window.webkitAudioContext)();
+  try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
+  if (!keep) { keep = new Audio(SILENT_WAV); keep.loop = true; }
+  keep.play().catch(() => {});
+  clearTimeout(keepT);
+  keepT = setTimeout(() => { keep.pause(); try { if (navigator.audioSession) navigator.audioSession.type = 'auto'; } catch {} }, 2200);
+  if (actx.state !== 'running') await actx.resume();
+}
+async function play(kind) {
   if (!sound) return;
   try {
-    actx ||= new (window.AudioContext || window.webkitAudioContext)();
-    actx.resume?.();
-    const out = actx.createGain(); out.gain.value = .5; out.connect(actx.destination);
+    await audioOn();
+    const out = actx.createGain(); out.gain.value = .9; out.connect(actx.destination);
     const bell = (f, t, len = .55, vol = .5) => {            // sine + 2x + 3x partials, fast attack, long exponential decay
       const at = actx.currentTime + t;
       [[1, 1], [2, .35], [3, .12]].forEach(([m, v]) => {
@@ -498,7 +513,7 @@ async function home(msg = '') {
         <select class="inp" id="bkd" aria-label="Backup reminder">${[[0, 'Off'], [1, 'Every day'], [3, 'Every 3 days'], [7, 'Every week'], [14, 'Every 2 weeks'], [30, 'Every month']].map(([v, l]) => `<option value="${v}" ${v === bkDays ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
       <div class="set"><div><strong>Sound effects</strong><p>A bright chime for correct, a soft low tone for wrong, and a short fanfare when you finish.</p></div>
         <input type="checkbox" class="tgl" id="snd" ${sound ? 'checked' : ''} aria-label="Sound effects"></div>
-      <div class="set"><div><strong>Try the sounds</strong><p>Turn your iPad volume up and silent mode off.</p></div>
+      <div class="set"><div><strong>Try the sounds</strong><p>No sound? Turn the iPad volume up and check it isn't muted (the bell icon in Control Center, or the side switch).</p></div>
         <div class="row"><button id="t-ok">Correct</button><button id="t-no">Wrong</button></div></div>
     </section>`;
   } else {
@@ -617,6 +632,10 @@ async function study(sel, practice = false) {
   };
   next();
 }
+
+// iOS ignores user-scalable=no in places, so also swallow pinch gestures (Safari's gesture* events and multi-finger moves)
+['gesturestart', 'gesturechange', 'gestureend'].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
+document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 
 navigator.storage?.persist?.();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');

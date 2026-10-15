@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<meta name="viewport" content="width=device-width,initial-scale=1,minimum-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover">
 <title>ankidote</title>
 <link rel="manifest" href="manifest.json">
 <link rel="icon" type="image/png" sizes="32x32" href="favicon-32.png">
@@ -20,7 +20,7 @@
 <style>
 :root{--gold:#ffc800}
 :root{--font:"Nunito",ui-rounded,"SF Pro Rounded","Avenir Next Rounded",-apple-system,"Segoe UI",system-ui,sans-serif}
-*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;touch-action:manipulation}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;touch-action:pan-x pan-y}
 html{-webkit-text-size-adjust:100%}
 body{margin:0;background:var(--bg) var(--pat);color:var(--fg);font:500 17px/1.55 var(--font);-webkit-user-select:none;user-select:none;-webkit-touch-callout:none;overscroll-behavior-y:none}
 .stem,.fbe,.hard,.prompt,.step,.tips{-webkit-user-select:text;user-select:text}
@@ -371,6 +371,13 @@ body.studying main{padding-bottom:24px}
 /* pages fill the screen; only the question view keeps a readable line length */
 .study{max-width:780px;margin-inline:auto;width:100%}
 .emptynote{margin:34px 0 0;max-width:34ch;line-height:1.4}
+/* ---- app-like shell: the page is locked to the screen, only the content area scrolls ---- */
+html{height:100%;overflow:hidden;overscroll-behavior:none}
+body{position:fixed;inset:0;width:100%;height:100%;overflow:hidden;overscroll-behavior:none}
+.shell{height:100%;min-height:0}
+nav{height:100%}
+main{height:100%;overflow-y:auto;overflow-x:hidden;overscroll-behavior:contain;-webkit-overflow-scrolling:touch}
+@media(max-width:699px){.shell{display:block;height:100%}nav{height:auto}}
 </style>
 </head>
 <body>
