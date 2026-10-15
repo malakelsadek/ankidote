@@ -372,7 +372,7 @@ async function home(msg = '') {
     if (folder) {
       const ds = [...new Set(scope.map(c => c.deck))].sort();
       list = `<h2>Decks</h2><div class="deckgrid">${ds.map(d => deckCard(d)).join('')}<button class="addtile" data-act="adddeck" data-pre="${esc(folder)}">${svg('<path d="M12 5v14M5 12h14"/>', 44)}<span>Add deck</span></button></div>`;
-    } else if (!cards.length && !FM.folders.length) list = '<p class="tag">No decks yet. Open the Folders or Decks tab and tap + to add one.</p>';
+    } else if (!cards.length && !FM.folders.length) list = '<p class="tag emptynote">No decks yet. Open the Folders or Decks tab and tap + to add one.</p>';
     else list = `<h2>Folders</h2><div class="folders">${allFolders(cards).map(f => {
       const cs = cards.filter(c => folderOf(c.deck) === f), nd = new Set(cs.map(c => c.deck)).size, todo = todoOf(cs), mat = cs.filter(c => c.interval >= 21).length;
       return `<button class="folder" data-folder="${esc(f)}"><span class="fic">${folderSvg(64)}</span>
