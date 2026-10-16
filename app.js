@@ -919,21 +919,23 @@ async function study(sel, practice = false) {
   lastScreen = null;
   const total = queue.length;
   let prevPct = 0;
+  const pinBar = () => { $.querySelectorAll('.snav,.sbar').forEach(b => b.style.left = document.getElementById('nav').offsetWidth + 'px'); };   // the bar is fixed to the screen bottom, beside the sidebar (top bar too)
   const hist = [];   // questions answered this session, for looking back at
   const next = () => {
     if (!queue.length) { play('done'); burst(innerWidth / 2, innerHeight * .55, 150, 1.5); return home(`${practice ? 'Practice done' : 'Done'}. ${total} question${total === 1 ? '' : 's'} reviewed.`); };
     const c = queue[0], isNew = !c.reps, t0 = Date.now();
-    $.innerHTML = `<div class="page study">
-      <div class="sbar"><button class="x" id="back" aria-label="Close">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 28)}</button>
-        <div class="prog"><i style="width:${prevPct}%"></i></div><span class="cnt">${practice ? 'Practice · ' : ''}${queue.length} left</span></div>
-      <div class="kickrow"><div class="kick">${isNew ? 'New question' : practice ? 'Practice' : 'Review'}</div><button class="hct2${hideCh ? ' on' : ''}" id="hq" aria-pressed="${hideCh}">Hide choices: ${hideCh ? 'On' : 'Off'}</button></div>
+    $.innerHTML = `<div class="sbar"><button class="x" id="back" aria-label="Close">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 28)}</button>
+        <div class="prog"><i style="width:${prevPct}%"></i></div><span class="cnt">${practice ? 'Practice · ' : ''}${queue.length} left</span><button class="hct2${hideCh ? ' on' : ''}" id="hq" aria-pressed="${hideCh}">Hide choices: ${hideCh ? 'On' : 'Off'}</button></div>
+      <div class="page study">
+      <div class="kick">${isNew ? 'New question' : practice ? 'Practice' : 'Review'}</div>
       <h2 class="qh">Choose the best answer</h2>
       <p class="stem">${esc(c.stem)}</p>
       ${hideCh ? '<button class="p" id="rv" style="width:100%;margin-bottom:14px">Show choices</button>' : ''}
       <div id="opts" ${hideCh ? 'hidden' : ''}>${c.options.map((o, i) => `<button class="opt" data-i="${i}"><b>${'ABCDEFGH'[i] || i + 1}</b><span>${esc(o)}</span></button>`).join('')}</div>
       <p class="kbd">A–E to answer · ${practice ? 'Enter to continue' : '1 Again · 2 Hard · 3 Good · 4 Easy · Enter to continue'}</p>
-      <div id="after"></div>
-      <div class="snav"><button id="sb" aria-label="Previous question" ${hist.length ? '' : 'disabled'}>‹ Back</button><span>Current question</span><button id="sf" aria-label="Skip question" ${queue.length > 1 ? '' : 'disabled'}>Skip ›</button></div></div>`;
+      <div id="after"></div></div>
+      <div class="snav"><button id="sb" aria-label="Previous question" ${hist.length ? '' : 'disabled'}>‹ Back</button><span>Current question</span><button id="sf" aria-label="Skip question" ${queue.length > 1 ? '' : 'disabled'}>Skip ›</button></div>`;
+    pinBar();
     const pct = Math.max(0, 100 * (1 - queue.length / total));
     const bar = $.querySelector('.prog i');
     requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = pct + '%'; }));
@@ -991,13 +993,14 @@ async function study(sel, practice = false) {
   };
   const review = i => {   // read-only look at an answered question; Forward walks back toward the current one, which starts fresh
     const { c, pick, correct } = hist[i], last = i === hist.length - 1;
-    $.innerHTML = `<div class="page study">
-      <div class="sbar"><button class="x" id="back" aria-label="Close">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 28)}</button><div class="prog"><i style="width:${prevPct}%"></i></div><span class="cnt">Looking back</span></div>
+    $.innerHTML = `<div class="sbar"><button class="x" id="back" aria-label="Close">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 28)}</button><div class="prog"><i style="width:${prevPct}%"></i></div><span class="cnt">Looking back</span></div>
+      <div class="page study">
       <div class="kick">${correct ? 'You got this right' : 'You got this wrong'}</div>
       <p class="stem">${esc(c.stem)}</p>
       <div id="opts">${c.options.map((o, j) => `<button class="opt ${j === c.answer ? 'ok' : j === pick ? 'no' : ''}" disabled><b>${'ABCDEFGH'[j] || j + 1}</b><span>${esc(o)}</span></button>`).join('')}</div>
-      ${c.explanation ? `<div class="fb ${correct ? 'ok' : 'no'}"><p class="fbe" style="margin:0">${esc(c.explanation)}</p></div>` : ''}
-      <div class="snav"><button id="sb" aria-label="Earlier question" ${i ? '' : 'disabled'}>‹ Back</button><span>${i + 1} of ${hist.length} answered</span><button id="sf" aria-label="${last ? 'Back to current question' : 'Later question'}">${last ? 'Current' : 'Forward'} ›</button></div></div>`;
+      ${c.explanation ? `<div class="fb ${correct ? 'ok' : 'no'}"><p class="fbe" style="margin:0">${esc(c.explanation)}</p></div>` : ''}</div>
+      <div class="snav"><button id="sb" aria-label="Earlier question" ${i ? '' : 'disabled'}>‹ Back</button><span>${i + 1} of ${hist.length} answered</span><button id="sf" aria-label="${last ? 'Back to current question' : 'Later question'}">${last ? 'Current' : 'Forward'} ›</button></div>`;
+    pinBar();
     $.querySelector('#back').onclick = () => home();
     $.querySelector('#sb').onclick = () => review(i - 1);
     $.querySelector('#sf').onclick = () => last ? next() : review(i + 1);
