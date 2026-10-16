@@ -152,6 +152,12 @@ const COMMON = `- Use only facts from the attached material. Do not invent conte
 - Spread the correct answers evenly. Across the whole set, each position (0, 1, 2, 3 and 4) must be correct about 20% of the time. AI models tend to favour the first three options, so put the correct answer in the 4th and 5th positions just as often as in the first three. Decide the position of the correct answer BEFORE writing each question, avoid patterns or runs of the same position, and do not make the correct option longer or more detailed than the distractors. Check the spread silently before you reply and rebalance if needed.
 - The explanation says why the answer is right and briefly why the main distractors are wrong.
 - If the material is a slide deck or PDF, add "slide": the number of the slide/page the question is based on (a whole number). Leave "slide" out if there is no clear one.`;
+const DIFF = `- Difficulty: make these hard. The student must reason, not recognise a keyword.
+  - Never name the diagnosis, cell, structure, drug class or mechanism in the stem. Describe the case or the defect and make the student work out what it is first.
+  - Then ask about a consequence of it (a downstream effect, a mechanism, a complication, what is lost or spared, what happens next). That is two reasoning steps in one question.
+  - Every option must be the same kind of thing (all cell types, all mechanisms, all haemodynamic effects) and sound plausible, so only someone who understands the topic can separate them.
+  - Do not let the stem or the correct option reuse distinctive words from the explanation of the answer.
+  - Style to match, with the options added: "A 4-year-old boy has recurrent opportunistic infections. Genetic testing confirms an inherited defect that completely arrests differentiation at the common lymphoid progenitor stage. Which group of mature cells will be absent while the other haematopoietic lineages are spared?" / "A 62-year-old man with chronic headache, facial plethora and generalised pruritus has an abnormal excess of mature circulating erythrocytes. Which haemodynamic alteration directly results from this?"`;
 const PROMPTS = [
   ['Standard SBA', 'Clinical vignettes that test understanding. The best default for most material.',
     `Create single-best-answer (SBA) exam questions from the attached material, in the style of UK medical school exams (NGU).
@@ -172,6 +178,7 @@ ${COMMON}`],
 
 - Each question is a short clinical vignette, and the question asks WHY it happens (the mechanism, cause or underlying process), not just what it is.
 - Exactly 5 options.
+${DIFF}
 ${COMMON}`],
   ['Pharmacology', 'Drug class, mechanism, indications, side effects, interactions and contraindications.',
     `Create single-best-answer pharmacology questions from the attached material.
@@ -179,6 +186,7 @@ ${COMMON}`],
 - Cover drug classes, mechanisms of action, indications, adverse effects, interactions, contraindications, monitoring and key doses where the material gives them.
 - Use short clinical vignettes where possible (for example "which drug is most appropriate" or "which adverse effect would you expect").
 - Exactly 5 options.
+${DIFF}
 ${COMMON}`],
   ['Investigations & management', 'Next best step, first-line treatment, and which test to order.',
     `Create single-best-answer questions from the attached material on diagnosis and management.
@@ -186,6 +194,7 @@ ${COMMON}`],
 - Each question is a clinical vignette ending in a question such as "What is the most appropriate next investigation?", "What is the most likely diagnosis?" or "What is the first-line management?".
 - Follow UK practice (NICE guidance) when the material does.
 - Exactly 5 options.
+${DIFF}
 ${COMMON}`],
   ['Anatomy', 'Clinical anatomy: relations, nerve and vessel supply, and injuries.',
     `Create single-best-answer anatomy questions from the attached material.
@@ -193,6 +202,7 @@ ${COMMON}`],
 - Test relations, innervation, blood supply, lymphatic drainage, surface anatomy and the clinical effects of injury or disease.
 - Use short clinical vignettes (for example a nerve injury or an occluded vessel) rather than bare labelling.
 - Exactly 5 options.
+${DIFF}
 ${COMMON}`],
   ['Interpret the data', 'Lab results, ABGs, ECG and imaging findings described in text.',
     `Create single-best-answer data-interpretation questions from the attached material.
@@ -200,6 +210,7 @@ ${COMMON}`],
 - Each stem gives a short case plus results written as text (blood tests with units and reference ranges, ABG, ECG description, imaging report, observations). The question asks for the diagnosis, cause or next step.
 - Do not rely on images.
 - Exactly 5 options.
+${DIFF}
 ${COMMON}`],
   ['Hard (exam level)', 'Multi-step reasoning with very similar options. For when the basics are solid.',
     `Create difficult single-best-answer questions from the attached material, harder than a typical exam.
@@ -207,11 +218,17 @@ ${COMMON}`],
 - Each question needs two or more reasoning steps (for example work out the diagnosis, then choose the treatment or complication).
 - Distractors must all be reasonable and differ only subtly. Avoid giveaway wording.
 - Exactly 5 options.
+${DIFF}
 ${COMMON}`],
 ];
 // question count for generated decks: 0 = as many as the material needs
 let qCount = 0;
 try { qCount = +localStorage.getItem('qcount') || 0; } catch {}
+let sess = 20, smode = null;   // session size, and which set to study (null = pick automatically)
+try { sess = +localStorage.getItem('sess') || 20; } catch {}
+const wrongIds = logs => { const last = new Map(); for (const l of logs) if (!last.has(l.id) || l.t >= last.get(l.id).t) last.set(l.id, l); return new Set([...last].filter(([, l]) => !l.correct).map(([id]) => id)); };   // cards whose latest answer was wrong
+let hideCh = false;   // answer from memory first: choices stay hidden until you tap Show choices
+try { hideCh = localStorage.getItem('hidech') === '1'; } catch {}
 const countLine = () => qCount
   ? `Write exactly ${qCount} question${qCount === 1 ? '' : 's'}, spread across the whole material, prioritising the most important and most examinable points.`
   : 'Write as many questions as it takes to cover every testable point in the material. Do not stop at a fixed number.';
@@ -496,6 +513,57 @@ async function deleteFolder(f) {
   await saveFM();
 }
 
+// ---- renaming (card ids stay the same, so progress is kept) ----
+async function renameDeck(o, n) {
+  await putMany('cards', (await all('cards')).filter(c => c.deck === o).map(c => ({ ...c, deck: n })));
+  if (o in FM.assign) { FM.assign[n] = FM.assign[o]; delete FM.assign[o]; await saveFM(); }
+  const list = await pdfList(o);
+  for (const p of list) {
+    const data = await pdfGet(pdfKey(o, p.id));
+    if (data) await pdfPut(pdfKey(n, p.id), data);
+    await pdfDel([pdfKey(o, p.id)]);
+  }
+  if (list.length) { await setMeta('pdfs:' + n, list); await setMeta('pdfs:' + o, []); }
+}
+async function renameFolder(o, n) {
+  const decks = new Set((await all('cards')).filter(c => folderOf(c.deck) === o).map(c => c.deck));
+  for (const d of decks) {
+    const i = d.indexOf(' - ');
+    if (FM.assign[d] === o) FM.assign[d] = n;
+    else if (!FM.assign[d] && i > 0) await renameDeck(d, n + d.slice(i));   // folder comes from the deck name
+    else FM.assign[d] = n;
+  }
+  FM.folders = [...new Set(FM.folders.map(x => x === o ? n : x))];
+  await saveFM();
+}
+function renameDialog(title, cur, max, check, apply) {
+  modal(`<h2>${esc(title)}</h2><input class="inp" id="rn" maxlength="${max}" value="${esc(cur)}" autocomplete="off">
+    <div class="row end"><button id="c">Cancel</button><button class="p" id="ok">Save</button></div><p class="err" id="er"></p>`, (o, close) => {
+    const q = s => o.querySelector(s);
+    const go = async () => {
+      const n = q('#rn').value.trim();
+      if (n === cur) return close();
+      const err = !n ? 'Type a name first.' : await check(n);
+      if (err) { q('#er').textContent = err; return; }
+      close(); await apply(n);
+    };
+    q('#c').onclick = close; q('#ok').onclick = go;
+    q('#rn').onkeydown = e => { if (e.key === 'Enter') go(); };
+    q('#rn').select();
+  });
+}
+function renameDeckUI(d) {
+  const i = d.indexOf(' - '), pre = lectureOf(d) !== d ? d.slice(0, i) + ' - ' : '';
+  renameDialog('Rename deck', lectureOf(d), 80,
+    async n => (await all('cards')).some(c => c.deck === pre + n) ? 'A deck with that name already exists.' : '',
+    async n => { await renameDeck(d, pre + n); home(`Renamed to "${n}".`); });
+}
+function renameFolderUI(f) {
+  renameDialog('Rename folder', f, 40,
+    async n => allFolders(await all('cards')).some(x => x !== f && x.toLowerCase() === n.toLowerCase()) ? 'That folder already exists.' : '',
+    async n => { await renameFolder(f, n); if (folder === f) folder = n; home(`Renamed to "${n}".`); });
+}
+
 // ---- dialogs ----
 function modal(html, bind) {
   const o = document.createElement('div');
@@ -571,11 +639,12 @@ async function home(msg = '') {
   const todoOf = cs => cs.filter(c => !c.reps || c.due <= now).length;
   const trash = svg('<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>', 20);
   const delBadge = (attr, v) => editing ? `<span class="del" data-${attr}="${esc(v)}" role="button" aria-label="Delete">${trash}</span>` : '';
+  const renBadge = (attr, v) => editing ? `<span class="ren" data-${attr}="${esc(v)}" role="button" aria-label="Rename">${svg('<path d="M4 20h4L19 9l-4-4L4 16zM13.500 6.500l4 4"/>', 20)}</span>` : '';
   const editBtn = `<button class="edit${editing ? ' on' : ''}" data-act="edit">${editing ? 'Done' : 'Edit'}</button>`;
   const slidesChip = d => { const n = pdfN.get(d) || 0; return editing ? '' : `<span class="sl${n ? ' on' : ''}" role="button" data-slides="${esc(d)}" data-n="${n}" aria-label="Slides">${slidesIco()}${n > 1 ? 'Slides · ' + n : n ? 'Slides' : '+ Slides'}</span>`; };
   const deckCard = (d, withFolder) => {
     const cs = cards.filter(c => c.deck === d), n = cs.length, todo = todoOf(cs), mat = cs.filter(c => c.interval >= 21).length;
-    return `<button class="deckcard${editing ? ' editing' : ''}" data-deck="${esc(d)}" ${todo ? '' : 'data-practice="1"'}>${delBadge('deldeck', d)}
+    return `<button class="deckcard${editing ? ' editing' : ''}" data-deck="${esc(d)}" ${todo ? '' : 'data-practice="1"'}>${delBadge('deldeck', d)}${renBadge('rendeck', d)}
       ${withFolder ? `<span class="fl">${folderSvg(18)}${esc(folderOf(d))}</span>` : ''}<span class="dn">${esc(lectureOf(d))}</span>
       <span class="dm"><small>${n} question${n === 1 ? '' : 's'}</small>${todo ? `<b class="due">${todo} to do</b>` : '<b class="due done">All done</b>'}</span>
       <span class="bar2"><i style="width:${Math.round(100 * mat / n)}%"></i></span>
@@ -590,6 +659,8 @@ async function home(msg = '') {
     if (!folder) editing = false;
     const scope = folder ? cards.filter(c => folderOf(c.deck) === folder) : cards;
     const sDue = scope.filter(c => c.reps && c.due <= now).length, sNew = scope.filter(c => !c.reps).length;
+    const wr = wrongIds(logs), nWrong = scope.filter(c => wr.has(c.id)).length;
+    const mode = smode || (sDue ? 'due' : sNew ? 'new' : nWrong ? 'wrong' : 'due'), cnt = { due: sDue, new: sNew, wrong: nWrong }[mode];
     const left = folder ? 'in this folder' : '';
     const head = folder
       ? `<button class="crumb" id="up">${svg('<path d="m15 6-6 6 6 6"/>', 22)} All folders</button><h1 class="pt">${esc(folder)}</h1><p class="tag">${new Set(scope.map(c => c.deck)).size} deck${new Set(scope.map(c => c.deck)).size === 1 ? '' : 's'} · ${scope.length} questions</p>`
@@ -601,15 +672,18 @@ async function home(msg = '') {
     } else if (!cards.length && !FM.folders.length) list = '<p class="tag emptynote">No decks yet. Open the Folders or Decks tab and tap + to add one.</p>';
     else list = `<h2>Folders</h2><div class="folders">${allFolders(cards).map(f => {
       const cs = cards.filter(c => folderOf(c.deck) === f), nd = new Set(cs.map(c => c.deck)).size, todo = todoOf(cs), mat = cs.filter(c => c.interval >= 21).length;
-      return `<button class="folder${editing ? ' editing' : ''}" data-folder="${esc(f)}">${delBadge('delfolder', f)}<span class="fic">${folderSvg(64)}</span>
+      return `<button class="folder${editing ? ' editing' : ''}" data-folder="${esc(f)}">${delBadge('delfolder', f)}${renBadge('renfolder', f)}<span class="fic">${folderSvg(64)}</span>
         <span class="ftx"><span class="nm">${esc(f)}</span><small>${nd} deck${nd === 1 ? '' : 's'} · ${cs.length} questions</small><span class="bar2"><i style="width:${cs.length ? Math.round(100 * mat / cs.length) : 0}%"></i></span></span>${todo ? `<b class="badge2">${todo}</b>` : ''}</button>`;
     }).join('')}</div>`;
     body = `<div class="toprow"><div>${head}</div>
       <div class="hud">${hp('flame', '#ff9600', streak(logs), 'day streak')}${folder && scope.length ? editBtn : ''}</div></div>
     ${banner}
     <section class="hero">
-      <div><span class="big">${sDue + sNew}</span><span class="lbl">${sDue + sNew || !scope.length ? 'to study today' : 'all done for today'} ${left}</span><div class="sub">${sDue} due · ${sNew} new · ${streak(logs)} day streak</div></div>
-      ${sDue + sNew ? `<button id="all" ${folder ? `data-folder="${esc(folder)}"` : ''}>Study ${folder ? 'folder' : 'all'}</button>` : scope.length ? `<button id="all" data-practice="1" ${folder ? `data-folder="${esc(folder)}"` : ''}>Practice anyway</button>` : ''}
+      <div><span class="big">${cnt}</span><span class="lbl">${cnt || !scope.length ? { due: 'questions due', new: 'new questions', wrong: 'to redo' }[mode] : { due: 'all done for today', new: 'no new questions', wrong: 'nothing to redo' }[mode]} ${left}</span><div class="sub">${sDue} due · ${sNew} new · ${streak(logs)} day streak</div>
+        <button class="hct${hideCh ? ' on' : ''}" id="hc" aria-pressed="${hideCh}">Hide choices first: ${hideCh ? 'On' : 'Off'}</button></div>
+      <div class="sess"><div class="chips">${[['due', 'Due', sDue], ['new', 'New', sNew], ['wrong', 'Wrong', nWrong]].map(([m, l, n]) => `<button class="chip${m === mode ? ' on' : ''}" data-mode="${m}">${l}<small>${n}</small></button>`).join('')}</div>
+        <div class="chips">${[10, 20, 30, 40].map(n => `<button class="chip${n === sess ? ' on' : ''}" data-size="${n}">${n}</button>`).join('')}</div>
+        ${cnt ? `<button id="all" data-mode="${mode}" data-limit="${sess}" ${folder ? `data-folder="${esc(folder)}"` : ''}>Start ${Math.min(cnt, sess)} question${Math.min(cnt, sess) === 1 ? '' : 's'}</button>` : scope.length ? `<button id="all" data-practice="1" data-limit="${sess}" ${folder ? `data-folder="${esc(folder)}"` : ''}>Practice anyway</button>` : ''}</div>
     </section>
     ${list}`;
   } else if (view === 'more') {
@@ -627,7 +701,7 @@ async function home(msg = '') {
       <div class="tbtns">${names.length ? editBtn : ''}<button class="p plus" data-act="newfolder" aria-label="New folder">${svg('<path d="M12 5v14M5 12h14"/>', 30)}</button></div></div>${banner}
     <div class="bigf">${names.map(f => {
       const cs = cards.filter(c => folderOf(c.deck) === f), nd = new Set(cs.map(c => c.deck)).size, todo = cs.filter(c => !c.reps || c.due <= now).length, mat = cs.filter(c => c.interval >= 21).length;
-      return `<button class="bf${editing ? ' editing' : ''}" data-folder="${esc(f)}">${delBadge('delfolder', f)}${todo ? `<b class="badge2">${todo}</b>` : ''}${folderSvg(132)}
+      return `<button class="bf${editing ? ' editing' : ''}" data-folder="${esc(f)}">${delBadge('delfolder', f)}${renBadge('renfolder', f)}${todo ? `<b class="badge2">${todo}</b>` : ''}${folderSvg(132)}
         <span class="nm">${esc(f)}</span><small>${nd} deck${nd === 1 ? '' : 's'} · ${cs.length} questions</small><span class="bar2"><i style="width:${cs.length ? Math.round(100 * mat / cs.length) : 0}%"></i></span></button>`;
     }).join('')}<button class="addtile" data-act="newfolder">${svg('<path d="M12 5v14M5 12h14"/>', 44)}<span>New folder</span></button></div>`;
   } else if (view === 'stats') {
@@ -761,16 +835,23 @@ async function home(msg = '') {
   }
 
   const q = s => $.querySelector(s);
-  if (q('#all')) q('#all').onclick = e => { const d = e.currentTarget.dataset; study(d.folder ? { folder: d.folder } : undefined, !!d.practice); };
+  if (q('#all')) q('#all').onclick = e => { const d = e.currentTarget.dataset; study({ ...(d.folder && { folder: d.folder }), mode: d.mode, limit: +d.limit || 0 }, !!d.practice); };
+  $.querySelectorAll('[data-mode].chip').forEach(b => b.onclick = () => { smode = b.dataset.mode; home(); });
+  $.querySelectorAll('[data-size]').forEach(b => b.onclick = () => { sess = +b.dataset.size; try { localStorage.setItem('sess', sess); } catch {} home(); });
   if (q('#up')) q('#up').onclick = () => { folder = null; editing = false; home(); };
-  $.querySelectorAll('[data-folder]:not(#all)').forEach(b => b.onclick = () => { if (editing) return; folder = b.dataset.folder; view = 'today'; home(); });
+  $.querySelectorAll('[data-folder]:not(#all)').forEach(b => b.onclick = () => { if (editing) return renameFolderUI(b.dataset.folder); folder = b.dataset.folder; view = 'today'; home(); });
   $.querySelectorAll('[data-pal]').forEach(b => b.onclick = () => { setPalette(b.dataset.pal); home(); });
-  $.querySelectorAll('[data-deck]').forEach(b => b.onclick = () => { if (editing) return; study({ deck: b.dataset.deck }, !!b.dataset.practice); });
+  $.querySelectorAll('[data-deck]').forEach(b => b.onclick = () => { if (editing) return renameDeckUI(b.dataset.deck); study({ deck: b.dataset.deck }, !!b.dataset.practice); });
+  if (q('#hc')) q('#hc').onclick = () => { hideCh = !hideCh; try { localStorage.setItem('hidech', hideCh ? '1' : '0'); } catch {} home(); };
   $.querySelectorAll('[data-act=edit]').forEach(b => b.onclick = () => { editing = !editing; home(); });
   $.querySelectorAll('[data-slides]').forEach(x => x.onclick = e => {
     e.stopPropagation(); e.preventDefault();
     const d = x.dataset.slides;
     if (+x.dataset.n === 1) openSlides(d); else slidesSheet(d);
+  });
+  $.querySelectorAll('[data-rendeck],[data-renfolder]').forEach(x => x.onclick = e => {
+    e.stopPropagation(); e.preventDefault();
+    x.dataset.rendeck ? renameDeckUI(x.dataset.rendeck) : renameFolderUI(x.dataset.renfolder);
   });
   $.querySelectorAll('[data-deldeck]').forEach(x => x.onclick = e => {
     e.stopPropagation(); e.preventDefault();
@@ -823,10 +904,11 @@ async function study(sel, practice = false) {
   document.body.classList.add('studying');
   const [cards, logs, pdfN] = await Promise.all([all('cards'), all('logs'), pdfCounts()]);
   const now = Date.now(), pool = sel?.deck ? cards.filter(c => c.deck === sel.deck) : sel?.folder ? cards.filter(c => folderOf(c.deck) === sel.folder) : cards;
-  const queue = practice ? pool.map(c => ({ ...c })).sort(() => Math.random() - .5) : [
-    ...pool.filter(c => c.reps && c.due <= now).sort((a, b) => a.due - b.due),
-    ...pool.filter(c => !c.reps),
-  ];
+  const wrong = wrongIds(logs), due = pool.filter(c => c.reps && c.due <= now).sort((a, b) => a.due - b.due), fresh = pool.filter(c => !c.reps);
+  let queue = practice ? pool.map(c => ({ ...c })).sort(() => Math.random() - .5)
+    : sel?.mode === 'due' ? due : sel?.mode === 'new' ? fresh
+    : sel?.mode === 'wrong' ? pool.filter(c => wrong.has(c.id)).sort(() => Math.random() - .5) : [...due, ...fresh];
+  if (sel?.limit) queue = queue.slice(0, sel.limit);
   lastScreen = null;
   const total = queue.length;
   let prevPct = 0;
@@ -839,19 +921,23 @@ async function study(sel, practice = false) {
       <div class="kick">${isNew ? 'New question' : practice ? 'Practice' : 'Review'}</div>
       <h2 class="qh">Choose the best answer</h2>
       <p class="stem">${esc(c.stem)}</p>
-      <div id="opts">${c.options.map((o, i) => `<button class="opt" data-i="${i}"><b>${'ABCDEFGH'[i] || i + 1}</b><span>${esc(o)}</span></button>`).join('')}</div>
-      <p class="kbd">A–E to answer · ${practice ? 'Enter to continue' : '1 Hard · 2 Good · 3 Easy · Enter to continue'}</p>
+      ${hideCh ? '<button class="p" id="rv" style="width:100%;margin-bottom:14px">Show choices</button>' : ''}
+      <div id="opts" ${hideCh ? 'hidden' : ''}>${c.options.map((o, i) => `<button class="opt" data-i="${i}"><b>${'ABCDEFGH'[i] || i + 1}</b><span>${esc(o)}</span></button>`).join('')}</div>
+      <p class="kbd">A–E to answer · ${practice ? 'Enter to continue' : '1 Again · 2 Hard · 3 Good · 4 Easy · Enter to continue'}</p>
       <div id="after"></div></div>`;
     const pct = Math.max(0, 100 * (1 - queue.length / total));
     const bar = $.querySelector('.prog i');
     requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = pct + '%'; }));
     prevPct = pct;
     $.querySelector('#back').onclick = e => { e.preventDefault(); home(); };
+    const reveal = () => { $.querySelector('#opts').hidden = false; $.querySelector('#rv')?.remove(); };
+    if (hideCh) $.querySelector('#rv').onclick = reveal;
     onkeydown = e => {
       if (e.metaKey || e.ctrlKey || e.altKey) return;
       const k = e.key.toLowerCase(), rb = $.querySelectorAll('[data-r]');
+      if ($.querySelector('#rv')) { if (k === 'enter' || k === ' ' || 'abcdefgh12345678'.includes(k) && k.length === 1) { e.preventDefault(); reveal(); } return; }
       if (rb.length) {
-        const r = k === 'enter' || k === ' ' ? $.querySelector('[data-r].p') : rb.length === 3 && '123'.includes(k) && k ? rb['123'.indexOf(k)] : null;
+        const r = k === 'enter' || k === ' ' ? $.querySelector('[data-r].p') : rb.length === 4 && '1234'.includes(k) && k ? rb['1234'.indexOf(k)] : null;
         if (r) { e.preventDefault(); r.click(); }
       } else {
         const i = 'abcdefgh'.indexOf(k), o = $.querySelectorAll('.opt')[k >= '1' && k <= '8' ? +k - 1 : i];
@@ -880,7 +966,7 @@ async function study(sel, practice = false) {
         ${c.explanation ? `<p class="fbe">${esc(c.explanation)}</p>` : ''}
         ${pdfN.get(c.deck) ? `<button class="slbtn" data-slide="${c.slide || 1}">${slidesIco()} ${c.slide ? 'View slide ' + c.slide : 'View slides'}</button>` : ''}
         <div class="row rate">${correct && !practice
-          ? ['hard', 'good', 'easy'].map(r => `<button data-r="${r}" ${r === 'good' ? 'class="p"' : ''}>${r}</button>`).join('')
+          ? ['again', 'hard', 'good', 'easy'].map(r => `<button data-r="${r}" ${r === 'good' ? 'class="p"' : ''}>${r}</button>`).join('')
           : `<button data-r="again" class="p">${correct ? 'Continue' : 'Next'}</button>`}</div>
         ${practice && !correct ? '<p class="hint">Missed ones come back until you get them right.</p>' : ''}</div>`;
       const sb = $.querySelector('.slbtn');
