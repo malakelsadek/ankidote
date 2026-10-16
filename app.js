@@ -948,7 +948,7 @@ function walkthrough() {
 }
 function splash() {
   const el = document.createElement('div'); el.className = 'ob';
-  el.innerHTML = '<div class="lr"><img class="logo" src="icon-192.png" alt=""><div class="brand">ankidote</div></div><p>the antidote to medical exam stress</p>';
+  el.innerHTML = '<div class="lr"><img class="logo" src="icon-192.png" alt=""><div class="tx"><div class="brand">ankidote</div><p>the antidote to medical exam stress</p></div></div>';
   document.body.append(el);
   setTimeout(() => {
     let seen = false; try { seen = localStorage.getItem('onboarded') === '1'; } catch {}
