@@ -68,9 +68,10 @@ main{flex:1;min-width:0;padding:max(32px,env(safe-area-inset-top)) max(40px,env(
 .hero button:active{box-shadow:none}
 .sess{display:flex;flex-direction:column;gap:12px;min-width:min(340px,100%)}
 .hero .chips{display:flex;gap:8px}
-.hero .chip{flex:1;min-height:44px;padding:0 10px;flex-direction:column;gap:2px;background:rgba(255,255,255,.18);color:#fff;border-color:transparent;box-shadow:none}
+.hero .chip{flex:1;min-height:44px;padding:0 10px;flex-direction:column;gap:2px;background:rgba(255,255,255,.18);color:#fff;border-color:rgba(255,255,255,.4);box-shadow:0 4px 0 rgba(0,0,0,.18)}
 .hero .chip small{font-size:12px;opacity:.85;letter-spacing:0}
-.hero .chip.on{background:#fff;color:var(--acc-d)}
+.hero .chip.on{background:#fff;color:var(--acc-d);border-color:#fff}
+.hero .chip:active{box-shadow:0 0 0 rgba(0,0,0,.18)}
 .hero .hct{margin-top:14px;min-height:40px;padding:0 16px;font-size:14px;background:transparent;color:#fff;border-color:rgba(255,255,255,.7);box-shadow:none}
 .hero .hct.on{background:rgba(255,255,255,.28);border-color:#fff}
 /* banners */
