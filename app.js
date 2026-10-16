@@ -336,7 +336,7 @@ const fsvg = (k, c, s = 26) => `<svg viewBox="0 0 24 24" width="${s}" height="${
 function renderNav() {
   const nav = document.getElementById('nav');
   nav.className = min ? 'min' : '';
-  nav.innerHTML = `<div class="brand">${min ? 'a' : 'ankidote'}</div>`
+  nav.innerHTML = `<div class="brand">${min ? '<img src="icon-192.png" alt="a" width="36" height="36" style="border-radius:9px;display:block;margin:0 auto">' : 'ankidote'}</div>`
     + [['today', 'Study'], ['folders', 'Folders'], ['decks', 'Decks'], ['stats', 'Stats'], ['data', 'Data', 'wo'], ['guide', 'Guide', 'wo'], ['tour', 'Walkthrough', 'wo'], ['settings', 'Settings', 'wo']].map(([v, l, c = '']) => `<button class="nv ${c} ${v === view ? 'on' : ''}" data-v="${v}" title="${l}">${svg(ICONS[v])}<span>${l}</span></button>`).join('')
     + `<button class="nv more ${['more', 'data', 'guide', 'settings'].includes(view) ? 'on' : ''}" data-v="more" title="More">${svg(ICONS.more)}<span>More</span></button>`
     + `<button class="nv tog" id="tog" title="${min ? 'Expand' : 'Minimize'}">${svg(ICONS.chev)}<span>Minimize</span></button>`;

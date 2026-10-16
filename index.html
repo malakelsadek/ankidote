@@ -378,6 +378,7 @@ nav{height:auto}
 .fr em{font-style:normal;font-size:12px;font-weight:800;text-transform:uppercase;letter-spacing:.06em;padding:2px 8px;border-radius:8px;background:var(--line)}
 .fr.l1{margin-left:11px;padding-left:22px;border-left:2px solid var(--line);position:relative}
 .fr.l1::before{content:"";position:absolute;left:0;top:50%;width:14px;border-top:2px solid var(--line)}
+@media (max-width:560px){.ob .logo{height:clamp(52px,17vw,68px);margin-right:-8px}.ob .brand{font-size:clamp(28px,9.5vw,38px)}.ob .tx p{font-size:clamp(9px,3.1vw,13px);margin:-10px 0 0 8px}}
 /* ---- motion ---- */
 @keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 @keyframes pop{0%{opacity:0;transform:scale(.6)}70%{transform:scale(1.08)}100%{opacity:1;transform:scale(1)}}
