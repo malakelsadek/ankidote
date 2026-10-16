@@ -321,6 +321,7 @@ const ICONS = {
   settings: '<circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 0 0 .3 1.8l.1.1a2 2 0 1 1-2.8 2.8l-.1-.1a1.7 1.7 0 0 0-1.8-.3 1.7 1.7 0 0 0-1 1.5V21a2 2 0 1 1-4 0v-.1a1.7 1.7 0 0 0-1.1-1.5 1.7 1.7 0 0 0-1.8.3l-.1.1a2 2 0 1 1-2.8-2.8l.1-.1a1.7 1.7 0 0 0 .3-1.8 1.7 1.7 0 0 0-1.5-1H3a2 2 0 1 1 0-4h.1a1.7 1.7 0 0 0 1.5-1.1 1.7 1.7 0 0 0-.3-1.8l-.1-.1a2 2 0 1 1 2.8-2.8l.1.1a1.7 1.7 0 0 0 1.8.3H9a1.7 1.7 0 0 0 1-1.5V3a2 2 0 1 1 4 0v.1a1.7 1.7 0 0 0 1 1.5 1.7 1.7 0 0 0 1.8-.3l.1-.1a2 2 0 1 1 2.8 2.8l-.1.1a1.7 1.7 0 0 0-.3 1.8V9a1.7 1.7 0 0 0 1.5 1H21a2 2 0 1 1 0 4h-.1a1.7 1.7 0 0 0-1.5 1z"/>',
   folders: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   decks: '<rect x="7" y="3" width="13" height="14" rx="2"/><path d="M4 7v12a2 2 0 0 0 2 2h10"/>',
+  tour: '<path d="M8 5v14l11-7z"/>',
   more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
   chev: '<path d="m15 6-6 6 6 6"/>',
 };
@@ -336,10 +337,10 @@ function renderNav() {
   const nav = document.getElementById('nav');
   nav.className = min ? 'min' : '';
   nav.innerHTML = `<div class="brand">${min ? 'a' : 'ankidote'}</div>`
-    + [['today', 'Study'], ['folders', 'Folders'], ['decks', 'Decks'], ['stats', 'Stats'], ['data', 'Data', 'wo'], ['guide', 'Guide', 'wo'], ['settings', 'Settings', 'wo']].map(([v, l, c = '']) => `<button class="nv ${c} ${v === view ? 'on' : ''}" data-v="${v}" title="${l}">${svg(ICONS[v])}<span>${l}</span></button>`).join('')
+    + [['today', 'Study'], ['folders', 'Folders'], ['decks', 'Decks'], ['stats', 'Stats'], ['data', 'Data', 'wo'], ['guide', 'Guide', 'wo'], ['tour', 'Walkthrough', 'wo'], ['settings', 'Settings', 'wo']].map(([v, l, c = '']) => `<button class="nv ${c} ${v === view ? 'on' : ''}" data-v="${v}" title="${l}">${svg(ICONS[v])}<span>${l}</span></button>`).join('')
     + `<button class="nv more ${['more', 'data', 'guide', 'settings'].includes(view) ? 'on' : ''}" data-v="more" title="More">${svg(ICONS.more)}<span>More</span></button>`
     + `<button class="nv tog" id="tog" title="${min ? 'Expand' : 'Minimize'}">${svg(ICONS.chev)}<span>Minimize</span></button>`;
-  nav.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { view = b.dataset.v; editing = false; if (view === 'today') folder = null; home(); });
+  nav.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { if (b.dataset.v === 'tour') return walkthrough(); view = b.dataset.v; editing = false; if (view === 'today') folder = null; home(); });
   nav.querySelector('#tog').onclick = () => { min = !min; try { localStorage.setItem('navmin', min ? '1' : '0'); } catch {} renderNav(); };
 }
 
@@ -705,6 +706,23 @@ async function home(msg = '') {
         <p>Pick a folder and choose the deck file. You can also attach the slides (up to 50 PDFs per deck), so you can open them while studying. Importing the same deck again keeps your progress.</p>
         <button class="p" data-act="adddeck">Add a deck</button></div></section>
     </div>
+    <button id="wt" style="margin:22px 0 18px">Replay the app walkthrough</button>
+    <h2>Keep your files organised</h2>
+    <section class="card"><p class="gdesc" style="margin:0 0 14px">In the <b>Files</b> app (On My iPad or iCloud Drive), set up this structure once:</p>
+      <div class="ftree">
+        <div class="fr">${svg(ICONS.folders, 24)}<b>ankidote</b></div>
+        <div class="fr l1">${svg(ICONS.folders, 22)}<b>decks</b><span>the .json files the AI gives you</span></div>
+        <div class="fr l1">${svg(ICONS.folders, 22)}<b>backups</b><span>exports from the Data tab</span></div>
+        <div class="fr l1">${svg(ICONS.folders, 22)}<b>slides</b><em>optional</em><span>your PDFs, to attach to a deck</span></div>
+      </div>
+      <p class="gdesc" style="margin:14px 0 0">Browsers can't create folders on your iPad for you, so this is a one-time manual setup. When you import or back up, pick files from these folders.</p></section>
+    <h2>Add to Home Screen (iPad)</h2>
+    <section class="card"><ol style="margin:0;padding-left:20px;line-height:1.6">
+      <li>Open this page in <b>Safari</b> (other iPad browsers work too on iPadOS 16.4+).</li>
+      <li>Tap the <b>Share</b> button (square with an up arrow) in the toolbar.</li>
+      <li>Scroll the menu and tap <b>Add to Home Screen</b>.</li>
+      <li>Keep the name, make sure <b>Open as Web App</b> is on if shown, then tap <b>Add</b>.</li>
+    </ol><p class="gdesc" style="margin-top:10px">It then opens full-screen like an app. Your data stays on this iPad, so back up from the Data tab.</p></section>
     <p class="fine">Study a little every day, and back up now and then from the Data tab.</p>`;
   } else if (view === 'settings') {
     const t = theme(), seg = (v, l) => `<button data-theme-set="${v}" class="${t === v ? 'on' : ''}">${l}</button>`;
@@ -720,7 +738,9 @@ async function home(msg = '') {
       <div class="set"><div><strong>Sound effects</strong><p>A bright chime for correct, a soft low tone for wrong, and a short fanfare when you finish.</p></div>
         <input type="checkbox" class="tgl" id="snd" ${sound ? 'checked' : ''} aria-label="Sound effects"></div>
       <div class="set"><div><strong>Try the sounds</strong><p>No sound? Turn the iPad volume up and check it isn't muted (the bell icon in Control Center, or the side switch).</p></div>
-        <div class="row"><button id="t-ok">Correct</button><button id="t-no">Wrong</button></div></div>
+        <div class="row" style="flex-wrap:nowrap;flex:none"><button id="t-ok">Correct</button><button id="t-no">Wrong</button></div></div>
+      <div class="set"><div><strong>App walkthrough</strong><p>A quick tour of what ankidote can do.</p></div>
+        <div class="row"><button id="wt">Start</button></div></div>
     </section>`;
   } else {
     body = `<h1 class="pt">Data</h1><div style="height:20px"></div>${banner}
@@ -775,6 +795,7 @@ async function home(msg = '') {
     q('#qcustom').oninput = e => setCount(Math.min(200, Math.max(1, Math.floor(+e.target.value) || 1)));
     show();
   }
+  if (q('#wt')) q('#wt').onclick = walkthrough;
   if (q('#cp')) q('#cp').onclick = async e => {
     try { await navigator.clipboard.writeText(promptText(pi)); } catch { const r = document.createRange(); r.selectNodeContents(q('#pr')); getSelection().removeAllRanges(); getSelection().addRange(r); document.execCommand('copy'); }
     e.target.textContent = 'Copied';
@@ -875,6 +896,68 @@ async function study(sel, practice = false) {
 ['gesturestart', 'gesturechange', 'gestureend'].forEach(ev => document.addEventListener(ev, e => e.preventDefault()));
 document.addEventListener('touchmove', e => { if (e.touches.length > 1) e.preventDefault(); }, { passive: false });
 
+// splash on every launch; the walkthrough only on the first one (or when replayed from the Guide)
+const TOUR = [
+  { h: 'Welcome to ankidote', t: 'A quick tour of the app. Use Next and Back to move around, or Skip any time.' },
+  { s: '[data-v="today"]', v: 'today', h: 'Study', t: 'Your daily questions live here. Missed ones come back sooner, ones you know come back later.' },
+  { s: '[data-v="folders"]', v: 'folders', h: 'Folders', t: 'Group your decks by subject. Tap + to create a folder.' },
+  { s: '[data-v="decks"]', v: 'decks', h: 'Decks', t: 'Every deck you have imported. Tap one to study it, or tap + to add a new one.' },
+  { s: '#cp', v: 'guide', h: 'Make decks with AI', t: 'Pick a question type, copy the prompt, give it your slides or notes in Claude or ChatGPT, then import the .json it makes.' },
+  { s: '[data-v="data"]', v: 'data', h: 'Data and backups', t: 'Import decks and back up your progress here. Tip: keep an "ankidote" folder in Files with decks, backups and (optional) slides inside.' },
+  { s: '[data-v="stats"]', v: 'stats', h: 'Stats', t: 'See your streak and which topics need the most work.' },
+  { s: '[data-v="settings"]', v: 'settings', h: 'Settings', t: 'Theme, sounds and backup reminders. You can replay this tour from here or the Guide.' },
+  { h: 'Add to Home Screen', t: 'In Safari tap Share, then Add to Home Screen, and ankidote opens full-screen like an app.' },
+];
+function walkthrough() {
+  if (document.querySelector('.tr')) return;
+  const v0 = view, ov = document.createElement('div'); ov.className = 'tr';
+  ov.innerHTML = '<div class="trh"></div><div class="trc"></div>'; document.body.append(ov);
+  const [hole, card] = ov.children; let i = 0;
+  hole.style.transition = card.style.transition = 'none'; // no sliding in from the corner on the first step
+  const end = () => {
+    try { localStorage.setItem('onboarded', '1'); } catch {}
+    ov.remove();
+    if (view !== v0) { view = v0; editing = false; home(); }
+  };
+  const step = () => {
+    const S = TOUR[i], last = i === TOUR.length - 1;
+    if (S.v && view !== S.v) { view = S.v; editing = false; if (S.v === 'today') folder = null; home(); }
+    card.style.opacity = 0; // hidden until positioned, so it never flashes in the wrong spot
+    card.innerHTML = `<small style="opacity:.6">${i + 1} / ${TOUR.length}</small><h3 style="margin:2px 0 6px">${S.h}</h3><p style="margin:0 0 14px">${S.t}</p>
+      <div class="row">
+      ${last ? '' : '<button id="sk">Skip</button>'}${i ? '<button id="bk">Back</button>' : ''}<button class="p" id="nx">${last ? 'Done' : 'Next'}</button></div>`;
+    card.querySelector('#nx').onclick = () => last ? end() : (i++, step());
+    if (i) card.querySelector('#bk').onclick = () => (i--, step());
+    if (!last) card.querySelector('#sk').onclick = end;
+    setTimeout(() => { // wait for the view to render
+      const t = S.s && document.querySelector(S.s); t?.scrollIntoView({ block: 'nearest' });
+      const r = t?.getBoundingClientRect(), ok = r && r.width > 0, W = innerWidth, H = innerHeight, w = card.offsetWidth, h = card.offsetHeight;
+      let x = (W - w) / 2, y = (H - h) / 2;
+      if (ok) {
+        Object.assign(hole.style, { left: r.left - 6 + 'px', top: r.top - 6 + 'px', width: r.width + 12 + 'px', height: r.height + 12 + (t.matches('button:not(.nv)') ? 4 : 0) + 'px' }); // buttons have a 4px drop shadow below their box
+        if (r.right + 14 + w <= W - 12) { x = r.right + 14; y = r.top + r.height / 2 - h / 2; }
+        else { x = r.left + r.width / 2 - w / 2; y = r.bottom + 14 + h <= H - 12 ? r.bottom + 14 : r.top - 14 - h; }
+      } else Object.assign(hole.style, { left: W / 2 + 'px', top: H / 2 + 'px', width: 0, height: 0 });
+      card.style.left = Math.max(12, Math.min(x, W - w - 12)) + 'px';
+      card.style.top = Math.max(12, Math.min(y, H - h - 12)) + 'px';
+      card.style.opacity = 1;
+      requestAnimationFrame(() => requestAnimationFrame(() => hole.style.transition = card.style.transition = ''));
+    }, 150);
+  };
+  step();
+}
+function splash() {
+  const el = document.createElement('div'); el.className = 'ob';
+  el.innerHTML = '<div class="lr"><img class="logo" src="icon-192.png" alt=""><div class="brand">ankidote</div></div><p>the antidote to medical exam stress</p>';
+  document.body.append(el);
+  setTimeout(() => {
+    let seen = false; try { seen = localStorage.getItem('onboarded') === '1'; } catch {}
+    if (seen) { el.classList.add('out'); setTimeout(() => el.remove(), 400); }
+    else { el.remove(); walkthrough(); }
+  }, 1600);
+}
+
 navigator.storage?.persist?.();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 home();
+splash();
