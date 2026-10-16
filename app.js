@@ -807,7 +807,7 @@ async function home(msg = '') {
       <div class="set"><div><strong>Appearance</strong><p>Light, dark, or follow the iPad.</p></div>
         <div class="seg2">${seg('light', 'Light')}${seg('dark', 'Dark')}${seg('auto', 'Auto')}</div></div>
       <div class="set"><div><strong>Interface size</strong><p>Zoom the whole app in or out.</p></div>
-        <div class="seg2">${[['.85', 'Small'], ['1', 'Default'], ['1.15', 'Large'], ['1.3', 'XL']].map(([z, l]) => `<button data-zoom="${z}" class="${zoomNow() === z ? 'on' : ''}">${l}</button>`).join('')}</div></div>
+        <div class="zoomr"><input type="range" id="zm" min="70" max="150" step="5" value="${Math.round(zoomNow() * 100)}" aria-label="Interface size"><b id="zv">${Math.round(zoomNow() * 100)}%</b></div></div>
       <div class="set col"><div><strong>Color theme</strong><p>Pick a palette for the whole app.</p></div>
         <div class="pals">${PALETTES.map(p => `<button class="pal ${p.id === curPalette() ? 'on' : ''}" data-pal="${p.id}" aria-label="${p.label}"><span class="dots"><i style="background:${p.sw[0]}"></i><i style="background:${p.sw[1]}"></i></span>${p.label}</button>`).join('')}</div></div>
       <div class="set"><div><strong>Backup reminder</strong><p>How often to nudge you to save a backup. Your progress only lives on this iPad.</p></div>
@@ -886,7 +886,10 @@ async function home(msg = '') {
     setTimeout(() => { e.target.textContent = 'Copy prompt'; }, 1500);
   };
   if (q('#bkd')) q('#bkd').onchange = e => { bkDays = +e.target.value; try { localStorage.setItem('bkdays', bkDays); } catch {} };
-  $.querySelectorAll('[data-zoom]').forEach(b => b.onclick = () => { try { localStorage.setItem('zoom', b.dataset.zoom); } catch {} document.documentElement.style.zoom = b.dataset.zoom; home(); });
+  if (q('#zm')) {   // applied on release, because zooming while dragging would move the slider out from under the finger
+    q('#zm').oninput = e => { q('#zv').textContent = e.target.value + '%'; };
+    q('#zm').onchange = e => { const z = e.target.value / 100; try { localStorage.setItem('zoom', z); } catch {} document.documentElement.style.zoom = z; };
+  }
   $.querySelectorAll('[data-theme-set]').forEach(b => b.onclick = () => { setTheme(b.dataset.themeSet); home(); });
   if (q('#snd')) q('#snd').onchange = e => {
     sound = e.target.checked;
@@ -923,7 +926,7 @@ async function study(sel, practice = false) {
     $.innerHTML = `<div class="page study">
       <div class="sbar"><button class="x" id="back" aria-label="Close">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 28)}</button>
         <div class="prog"><i style="width:${prevPct}%"></i></div><span class="cnt">${practice ? 'Practice · ' : ''}${queue.length} left</span></div>
-      <div class="kick">${isNew ? 'New question' : practice ? 'Practice' : 'Review'}</div>
+      <div class="kickrow"><div class="kick">${isNew ? 'New question' : practice ? 'Practice' : 'Review'}</div><button class="hct2${hideCh ? ' on' : ''}" id="hq" aria-pressed="${hideCh}">Hide choices: ${hideCh ? 'On' : 'Off'}</button></div>
       <h2 class="qh">Choose the best answer</h2>
       <p class="stem">${esc(c.stem)}</p>
       ${hideCh ? '<button class="p" id="rv" style="width:100%;margin-bottom:14px">Show choices</button>' : ''}
@@ -938,6 +941,7 @@ async function study(sel, practice = false) {
     $.querySelector('#back').onclick = e => { e.preventDefault(); home(); };
     $.querySelector('#sb').onclick = () => review(hist.length - 1);
     $.querySelector('#sf').onclick = () => { queue.push(queue.shift()); next(); };   // skip: it comes back at the end
+    $.querySelector('#hq').onclick = () => { hideCh = !hideCh; try { localStorage.setItem('hidech', hideCh ? '1' : '0'); } catch {} next(); };
     const reveal = () => { $.querySelector('#opts').hidden = false; $.querySelector('#rv')?.remove(); };
     if (hideCh) $.querySelector('#rv').onclick = reveal;
     onkeydown = e => {
@@ -956,7 +960,7 @@ async function study(sel, practice = false) {
     $.querySelectorAll('.opt').forEach(b => b.onclick = () => {
       const pick = +b.dataset.i, correct = pick === c.answer, ms = Date.now() - t0;
       play(correct ? 'ok' : 'no');
-      hist.push({ c, pick, correct }); $.querySelector('#sb').disabled = $.querySelector('#sf').disabled = true;   // finish rating this one first
+      hist.push({ c, pick, correct }); $.querySelector('.snav').style.display = $.querySelector('#hq').style.display = 'none';   // hide while rating, so it never covers the feedback popup
       if (correct) { const r = b.getBoundingClientRect(); burst(r.left + r.width / 2, r.top + r.height / 2, 24); }
       $.querySelectorAll('.opt').forEach((x, i) => { x.disabled = true; if (i === c.answer) x.classList.add('ok'); else if (i === pick) x.classList.add('no'); });
       const rate = async rating => {

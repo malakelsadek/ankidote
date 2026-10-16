@@ -538,6 +538,13 @@ body.studying main{padding-top:0}
 @media(max-width:699px){.tbtns,.hud{top:calc(max(18px,env(safe-area-inset-top)) + 6px);right:max(16px,env(safe-area-inset-right))}.toprow>div:first-child{padding-right:170px}}
 body.studying .tbtns,body.studying .hud{display:none}
 .page:not(.study)>.toprow{animation:none}   /* a transform here would pin the fixed buttons to the row */
+.zoomr{display:flex;align-items:center;gap:14px;flex:none;width:min(260px,45vw)}
+.zoomr input{flex:1;accent-color:var(--acc);height:30px}
+.zoomr b{min-width:48px;text-align:right}
+.kickrow{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:8px}
+.kickrow .kick{margin:0}
+.hct2{min-height:36px;padding:0 14px;font-size:12px;box-shadow:0 3px 0 var(--line)}
+.hct2.on{background:var(--accsoft);border-color:var(--acc);color:var(--acc-d);box-shadow:0 3px 0 var(--acc)}
 </style>
 </head>
 <body>
