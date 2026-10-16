@@ -387,6 +387,9 @@ nav{height:auto}
 .fr.l1{margin-left:11px;padding-left:22px;border-left:2px solid var(--line);position:relative}
 .fr.l1::before{content:"";position:absolute;left:0;top:50%;width:14px;border-top:2px solid var(--line)}
 @media (max-width:560px){.ob .logo{height:clamp(52px,17vw,68px);margin-right:-8px}.ob .brand{font-size:clamp(28px,9.5vw,38px)}.ob .tx p{font-size:clamp(9px,3.1vw,13px);margin:-10px 0 0 8px}}
+.snav{position:sticky;bottom:0;z-index:5;display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:auto;padding:12px 0 max(12px,env(safe-area-inset-bottom));background:var(--bg)}
+.snav span{flex:1;text-align:center;color:var(--mut);font-size:14px;font-weight:800}
+.snav button{min-height:46px;padding:0 18px;font-size:15px}
 /* ---- motion ---- */
 @keyframes rise{from{opacity:0;transform:translateY(16px)}to{opacity:1;transform:none}}
 @keyframes pop{0%{opacity:0;transform:scale(.6)}70%{transform:scale(1.08)}100%{opacity:1;transform:scale(1)}}
@@ -530,6 +533,11 @@ body.studying main{padding-top:0}
 .sheet:has(.plist){width:min(640px,100%)}
 /* question screen: unzoomed a little */
 .study{zoom:.85;max-width:900px;min-height:calc(100dvh / .85 - 60px)}
+/* top-right buttons (Edit, +, streak) stay put while the page scrolls */
+.tbtns,.hud{position:fixed;z-index:20;top:calc(max(32px,env(safe-area-inset-top)) + 6px);right:max(40px,env(safe-area-inset-right));margin:0;padding:0}
+@media(max-width:699px){.tbtns,.hud{top:calc(max(18px,env(safe-area-inset-top)) + 6px);right:max(16px,env(safe-area-inset-right))}.toprow>div:first-child{padding-right:170px}}
+body.studying .tbtns,body.studying .hud{display:none}
+.page:not(.study)>.toprow{animation:none}   /* a transform here would pin the fixed buttons to the row */
 </style>
 </head>
 <body>

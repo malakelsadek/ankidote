@@ -1,6 +1,7 @@
 // Colour palettes. Each palette is a set of CSS variables for light and dark mode,
 // written into one <style>, so the whole UI recolours with no per-component code.
 (() => {
+  try { const z = localStorage.getItem('zoom'); if (z) document.documentElement.style.zoom = z; } catch {}   // interface size, set in Settings
   try { const t = localStorage.getItem('theme'); if (t) document.documentElement.dataset.theme = t; } catch {}
 
   const hex = (h, s, l) => {
