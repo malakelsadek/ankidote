@@ -393,6 +393,8 @@ const ICONS = {
   folders: '<path d="M3 7a2 2 0 0 1 2-2h4l2 2h8a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>',
   decks: '<rect x="7" y="3" width="13" height="14" rx="2"/><path d="M4 7v12a2 2 0 0 0 2 2h10"/>',
   tour: '<path d="M8 5v14l11-7z"/>',
+  subscription: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h3"/>',
+  generate: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/>',
   more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
   chev: '<path d="m15 6-6 6 6 6"/>',
 };
@@ -404,12 +406,18 @@ const FILL = {
   check: '<circle cx="12" cy="12" r="10"/><path d="m7.500 12.500 3 3 6-6.500" fill="none" stroke="#fff" stroke-width="2.600" stroke-linecap="round" stroke-linejoin="round"/>',
 };
 const fsvg = (k, c, s = 26) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="${c}">${FILL[k]}</svg>`;
+// signed-in account shown above Settings: profile picture (or an initial) and first name; tapping it opens Settings, where Sign out is
+let me = null;
+const accountBtn = () => {
+  const u = me?.user_metadata || {}, name = u.full_name || u.name || me?.email || 'Account';
+  return `<button class="nv wo acct" data-v="settings" title="${esc(name)}">${u.avatar_url ? `<img class="av" src="${esc(u.avatar_url)}" alt="" referrerpolicy="no-referrer">` : `<i class="av">${esc(name[0].toUpperCase())}</i>`}<span>${esc(name.split(' ')[0])}</span></button>`;
+};
 function renderNav() {
   const nav = document.getElementById('nav');
   nav.className = min ? 'min' : '';
   nav.innerHTML = `<div class="brand">${min ? '<img src="icon-192.png" alt="a" width="36" height="36" style="border-radius:9px;display:block;margin:0 auto">' : 'ankidote'}</div>`
-    + [['today', 'Study'], ['folders', 'Folders'], ['decks', 'Decks'], ['stats', 'Stats'], ['data', 'Data', 'wo'], ['guide', 'Guide', 'wo'], ['tour', 'Walkthrough', 'wo'], ['settings', 'Settings', 'wo']].map(([v, l, c = '']) => `<button class="nv ${c} ${v === view ? 'on' : ''}" data-v="${v}" title="${l}">${svg(ICONS[v])}<span>${l}</span></button>`).join('')
-    + `<button class="nv more ${['more', 'data', 'guide', 'settings'].includes(view) ? 'on' : ''}" data-v="more" title="More">${svg(ICONS.more)}<span>More</span></button>`
+    + [['today', 'Study'], ['folders', 'Folders'], ['decks', 'Decks'], ['stats', 'Stats'], ['generate', 'Generate', 'wo'], ['data', 'Data', 'wo'], ['guide', 'Guide', 'wo'], ['tour', 'Walkthrough', 'wo'], ['subscription', 'Subscription', 'wo'], ['settings', 'Settings', 'wo']].map(([v, l, c = '']) => (v === 'subscription' ? accountBtn() : '') +`<button class="nv ${c} ${v === view ? 'on' : ''}" data-v="${v}" title="${l}">${svg(ICONS[v])}<span>${l}</span></button>`).join('')
+    + `<button class="nv more ${['more', 'generate', 'subscription', 'data', 'guide', 'settings'].includes(view) ? 'on' : ''}" data-v="more" title="More">${svg(ICONS.more)}<span>More</span></button>`
     + `<button class="nv tog" id="tog" title="${min ? 'Expand' : 'Minimize'}">${svg(ICONS.chev)}<span>Minimize</span></button>`;
   nav.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { if (b.dataset.v === 'tour') return walkthrough(); view = b.dataset.v; editing = false; if (view === 'today') folder = null; home(); });
   nav.querySelector('#tog').onclick = () => { min = !min; try { localStorage.setItem('navmin', min ? '1' : '0'); } catch {} renderNav(); };
@@ -650,6 +658,131 @@ function newFolderDialog(done) {
     q('#fn').onkeydown = e => { if (e.key === 'Enter') go(); };
   });
 }
+// ---- plans: 7-day trial with a small AI allowance, then a paid plan (the server enforces this; the app only displays it) ----
+const PLAN = { name: 'AI Plus', price: 'EGP 500', questions: 400 }, TRIAL_GENS = 2, TRIAL_PAGES = 30;
+const planOf = s => {
+  const now = Date.now();
+  if (s?.status === 'active' && s.current_period_end && new Date(s.current_period_end) > now) return { k: 'active', until: new Date(s.current_period_end) };
+  if (s && new Date(s.trial_ends_at) > now) return { k: 'trial', left: Math.ceil((new Date(s.trial_ends_at) - now) / DAY), gens: TRIAL_GENS - s.trial_generations_used };
+  return { k: 'free' };
+};
+
+const coverPath = p => p.replace(/\.pdf$/, '.jpg');
+const signedCovers = async files => {   // file id -> temporary image address ('' when a file has no cover)
+  if (!files.length) return new Map();
+  const { data } = await sb.storage.from('slides').createSignedUrls(files.map(f => coverPath(f.storage_path)), 3600);
+  return new Map(files.map((f, i) => [f.id, data?.[i]?.signedUrl || '']));
+};
+const tileBody = (f, cover) => `<span class="scover">${cover ? `<img src="${esc(cover)}" alt="">` : slidesIco()}</span><span class="sname">${esc(f.file_name.replace(/\.pdf$/i, ''))}</span><small>${f.week ? 'Week ' + f.week + ' · ' : ''}${f.page_count} page${f.page_count === 1 ? '' : 's'}</small>`;
+let slideView = 'tiles';
+try { slideView = localStorage.getItem('slideview') || 'tiles'; } catch {}
+
+// ---- slides in the cloud: PDF goes to private storage, each page's text to the "slides" table (questions are generated from that text) ----
+const MAX_CLOUD_PDF = 50 * 1024 * 1024;   // Supabase free-plan upload limit
+async function uploadSlides(deckName, week, files, say) {
+  await loadPdfjs();
+  await ensureDecks([deckName]);
+  const deckId = cache.deckId.get(deckName), uid = (await sb.auth.getUser()).data.user.id, notes = [];
+  for (const f of files) {
+    if (f.size > MAX_CLOUD_PDF) { notes.push(`"${f.name}" is over 50 MB, so it was skipped.`); continue; }
+    const doc = await pdfjsLib.getDocument({ data: await f.arrayBuffer() }).promise, pages = [];
+    for (let p = 1; p <= doc.numPages; p++) {
+      say(`${f.name}: reading page ${p} of ${doc.numPages}…`);
+      const t = await (await doc.getPage(p)).getTextContent();
+      pages.push(t.items.map(i => i.str).join(' ').replace(/\u0000/g, '').replace(/\s+/g, ' ').trim());
+    }
+    say(`${f.name}: saving…`);
+    const id = crypto.randomUUID(), path = `${uid}/${id}.pdf`;
+    chk(await sb.storage.from('slides').upload(path, f, { contentType: 'application/pdf' }));
+    try {   // cover image = first page, stored next to the PDF under the same name with .jpg
+      const pg = await doc.getPage(1), w = pg.getViewport({ scale: 1 }).width, vp = pg.getViewport({ scale: 480 / w });
+      const cv = document.createElement('canvas'); cv.width = vp.width; cv.height = vp.height;
+      await pg.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
+      chk(await sb.storage.from('slides').upload(coverPath(path), await new Promise(r => cv.toBlob(r, 'image/jpeg', .8)), { contentType: 'image/jpeg' }));
+    } catch {}   // no cover is fine, the tile shows an icon
+    chk(await sb.from('slide_files').insert({ id, deck_id: deckId, file_name: f.name, storage_path: path, week, page_count: doc.numPages }));
+    for (const part of chunks(pages.map((body, i) => ({ file_id: id, page: i + 1, week, body })), 200)) chk(await sb.from('slides').insert(part));
+    const blank = pages.filter(t => t.length < 20).length;
+    if (blank) notes.push(`${blank} page${blank === 1 ? '' : 's'} in "${f.name}" have almost no text (images only).`);
+  }
+  return notes;
+}
+function uploadDialog() {
+  const decks = [...new Set([...cache.deckId.keys(), ...[...cache.cards.values()].map(c => c.deck)])].sort();
+  modal(`<h2>Upload slides</h2><p>Name the deck these slides belong to. Use "Subject - Lecture" and it files itself in a folder.</p>
+    <input class="inp" id="dk" list="dks" maxlength="80" placeholder="e.g. Physiology - Body Plan" autocomplete="off">
+    <datalist id="dks">${decks.map(d => `<option value="${esc(d)}">`).join('')}</datalist>
+    <input class="inp" id="wk" type="number" min="1" max="60" placeholder="Week number (optional)">
+    <label class="btn pickpdf">${svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5"/>', 20)} Choose PDFs<input type="file" id="pf" accept="application/pdf,.pdf" multiple hidden></label>
+    <p class="pname" id="pname">Up to 50 MB each.</p>
+    <div class="row end"><button id="c">Cancel</button><button class="p" id="ok">Upload</button></div><p class="err" id="er"></p>`, (o, close) => {
+    const q = s => o.querySelector(s);
+    q('#c').onclick = close;
+    q('#pf').onchange = () => { const fs = [...q('#pf').files]; q('#pname').textContent = !fs.length ? 'Up to 50 MB each.' : fs.length === 1 ? `${fs[0].name} (${(fs[0].size / 1048576).toFixed(1)} MB)` : `${fs.length} PDFs selected`; };
+    q('#ok').onclick = async () => {
+      const name = q('#dk').value.trim(), files = [...q('#pf').files], week = parseInt(q('#wk').value, 10) || null;
+      if (!name) { q('#er').textContent = 'Give the deck a name.'; return; }
+      if (!files.length) { q('#er').textContent = 'Choose at least one PDF.'; return; }
+      q('#ok').disabled = q('#c').disabled = true;
+      try {
+        const notes = await uploadSlides(name, week, files, t => q('#er').textContent = t);
+        close(); home(['Slides uploaded.', ...notes].join(' '));
+      } catch (e) { q('#ok').disabled = q('#c').disabled = false; q('#er').textContent = 'Upload failed: ' + (e.message || e); }
+    };
+  });
+}
+// ---- AI generation: the "generate" Edge Function writes up to 10 questions per call; we call it until we have enough ----
+async function callGenerate(body) {
+  const { data, error } = await sb.functions.invoke('generate', { body });
+  if (!error) return data;
+  let m = {}; try { m = await error.context.json(); } catch {}
+  throw Object.assign(new Error(m.error || 'Something went wrong. Try again.'), { code: m.code });
+}
+async function generateDialog(deck) {
+  const files = chk(await sb.from('slide_files').select('id,file_name,week,page_count,storage_path').eq('deck_id', cache.deckId.get(deck)).order('file_name'));
+  const covers = await signedCovers(files);
+  const weeks = [...new Set(files.map(f => f.week).filter(Boolean))].sort((a, b) => a - b);
+  modal(`<h2>Generate questions</h2><p>${esc(deck)}. Tap the slides to read. The AI writes hard case-study questions from them, with an explanation for every option.</p>
+    <div class="sgrid gfiles${slideView === 'list' ? ' wide' : ''}">${files.map(f => `<button type="button" class="stile sel" data-fid="${f.id}">${tileBody(f, covers.get(f.id))}</button>`).join('')}</div>
+    <div class="gctl">
+      ${weeks.length ? `<select class="inp" id="gw"><option value="">Any week</option>${weeks.map(w => `<option value="${w}">Week ${w}</option>`).join('')}</select>` : ''}
+      <input class="inp" id="gp1" type="number" min="1" placeholder="From page" disabled><input class="inp" id="gp2" type="number" min="1" placeholder="To page" disabled>
+      <select class="inp" id="gn">${[10, 20, 30, 40, 50].map(n => `<option value="${n}" ${n === 30 ? 'selected' : ''}>${n} questions</option>`).join('')}</select>
+    </div>
+    <p class="pname" style="margin-bottom:12px!important">It reads up to 60 slide pages at a time. For a long deck, pick a week or a page range.</p>
+    <div class="row end"><button id="c">Cancel</button><button class="p" id="ok">Generate</button></div><p class="err" id="er"></p>`, (o, close) => {
+    const q = s => o.querySelector(s);
+    q('#c').onclick = close;
+    const picked = () => [...o.querySelectorAll('[data-fid].sel')].map(b => b.dataset.fid);
+    const syncRange = () => { const one = picked().length === 1; q('#gp1').disabled = q('#gp2').disabled = !one; if (!one) q('#gp1').value = q('#gp2').value = ''; };
+    o.querySelectorAll('[data-fid]').forEach(b => b.onclick = () => { b.classList.toggle('sel'); syncRange(); });
+    syncRange();
+    q('#ok').onclick = async () => {
+      const ids = picked();
+      if (!ids.length) { q('#er').textContent = 'Tap at least one slide file.'; return; }
+      const count = +q('#gn').value, body = { deck, fileIds: ids, week: +q('#gw')?.value || undefined, fromPage: +q('#gp1').value || undefined, toPage: +q('#gp2').value || undefined };
+      q('#ok').disabled = q('#c').disabled = true;
+      let added = 0, err = null;
+      try {
+        while (added < count) {
+          q('#er').textContent = added ? `Wrote ${added} of ${count}…` : 'Writing questions… this can take a minute.';
+          const n = Math.min(10, count - added), r = await callGenerate({ ...body, count: n });
+          added += r.added;
+          if (r.added < n) break;   // the slides are used up, or the monthly limit was reached
+        }
+      } catch (e) { err = e; }
+      if (added) { ready = loadAll(); await ready; }   // the function saved them straight to the database; reload so the app sees them
+      if (err && !added) {
+        q('#ok').disabled = q('#c').disabled = false;
+        q('#er').textContent = err.message;
+        if (err.code === 'subscribe') { close(); view = 'subscription'; home(err.message); }
+        return;
+      }
+      close();
+      home(added ? `Added ${added} question${added === 1 ? '' : 's'} to "${deck}".${err ? ' ' + err.message : ''}` : 'No new questions were written. The slides may not have enough new material.');
+    };
+  });
+}
 async function importDialog(pre = '') {
   const folders = allFolders(await all('cards'));
   modal(`<h2>Add a deck</h2><p>Choose the folder it goes in, then pick the file the AI made.</p>
@@ -743,7 +876,7 @@ async function home(msg = '') {
   } else if (view === 'more') {
     const row = (v, t, d) => `<button class="morerow" data-go="${v}"><span class="mi">${svg(ICONS[v], 28)}</span><span class="mt"><b>${t}</b><small>${d}</small></span><span class="chv">›</span></button>`;
     body = `<h1 class="pt">More</h1><div style="height:20px"></div>${banner}
-    <div class="morelist">${row('data', 'Data', 'Import decks and back up your progress')}${row('guide', 'Guide', 'How to make decks with AI')}${row('settings', 'Settings', 'Theme, sounds and reminders')}</div>`;
+    <div class="morelist">${row('generate', 'Generate', 'Upload slides and write questions with AI')}${row('subscription', 'Subscription', 'Your plan and AI usage')}${row('data', 'Data', 'Import decks and back up your progress')}${row('guide', 'Guide', 'How to make decks with AI')}${row('settings', 'Settings', 'Theme, sounds and reminders')}</div>`;
   } else if (view === 'decks') {
     const names = [...new Set(cards.map(c => c.deck))].sort((a, b) => folderOf(a).localeCompare(folderOf(b)) || a.localeCompare(b));
     body = `<div class="toprow"><div><h1 class="pt">All decks</h1><p class="tag">${names.length ? names.length + ' deck' + (names.length === 1 ? '' : 's') + ' · tap one to study it' : 'tap + to add your first deck'}</p></div>
@@ -852,6 +985,36 @@ async function home(msg = '') {
       <li>Keep the name, make sure <b>Open as Web App</b> is on if shown, then tap <b>Add</b>.</li>
     </ol><p class="gdesc" style="margin-top:10px">It then opens full-screen like an app. Your data stays on this iPad, so back up from the Data tab.</p></section>
     <p class="fine">Study a little every day, and back up now and then from the Data tab.</p>`;
+  } else if (view === 'generate') {
+    const files = chk(await sb.from('slide_files').select('id,file_name,week,page_count,storage_path,deck_id').order('file_name'));
+    const dn = new Map([...cache.deckId].map(([n, id]) => [id, n])), by = new Map(), covers = await signedCovers(files);
+    files.forEach(f => { const n = dn.get(f.deck_id); by.set(n, [...(by.get(n) || []), f]); });
+    const del = f => `data-delfile="${f.id}" data-path="${esc(f.storage_path)}" data-name="${esc(f.file_name)}"`;
+    const tiles = fs => `<div class="sgrid">${fs.map(f => `<div class="stile">${tileBody(f, covers.get(f.id))}<button class="sx" ${del(f)} aria-label="Remove ${esc(f.file_name)}">${svg(TRASH_PATH, 18)}</button></div>`).join('')}</div>`;
+    const list = fs => `<section class="card" style="padding-top:6px;padding-bottom:6px">${fs.map(f => `
+      <div class="set"><div><strong>${esc(f.file_name)}</strong><p>${f.week ? 'Week ' + f.week + ' · ' : ''}${f.page_count} page${f.page_count === 1 ? '' : 's'}</p></div>
+        <div class="row"><button ${del(f)}>Remove</button></div></div>`).join('')}</section>`;
+    body = `<div class="toprow"><div style="padding-right:84px"><h1 class="pt">Generate</h1><p class="tag">Turn your slides into exam questions.</p></div>
+      <div class="tbtns"><button class="p plus" data-act="uploadslides" aria-label="Upload slides">${svg('<path d="M12 5v14M5 12h14"/>', 30)}</button></div></div>${banner}
+    ${by.size ? `<div class="seg2 vtog">${[['tiles', 'Tiles'], ['list', 'List']].map(([v, l]) => `<button data-sv="${v}" class="${slideView === v ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
+    ${by.size ? [...by].map(([n, fs]) => `<div class="kickrow" style="margin-top:14px"><h2 style="margin:0">${esc(n)}</h2><button class="p" data-gen="${esc(n)}">Generate questions</button></div>${slideView === 'list' ? list(fs) : tiles(fs)}`).join('')
+      : '<p class="tag emptynote" style="font-size:18px;max-width:46ch">No slides yet. Tap + to upload a PDF. You can still add decks the manual way from the Decks tab.</p>'}`;
+  } else if (view === 'subscription') {
+    const [{ data: sub }, { data: us }] = await Promise.all([sb.from('subscriptions').select('*').maybeSingle(), sb.from('usage').select('questions').eq('month', new Date().toISOString().slice(0, 7)).maybeSingle()]);
+    const p = planOf(sub), used = us?.questions || 0;
+    const status = p.k === 'active' ? `Active until ${p.until.toLocaleDateString()}` : p.k === 'trial' ? `Free trial · ${p.left} day${p.left === 1 ? '' : 's'} left` : 'Free plan';
+    const note = p.k === 'active' ? `${used} of ${PLAN.questions} AI questions used this month.`
+      : p.k === 'trial' ? `${Math.max(0, p.gens)} of ${TRIAL_GENS} free AI runs left, up to ${TRIAL_PAGES} slide pages each.`
+      : 'Your trial has ended. Creating, importing and studying decks is still free. Subscribe to write questions with AI.';
+    body = `<h1 class="pt">Subscription</h1><div style="height:20px"></div>${banner}
+    <div class="two">
+      <section class="card"><h2 style="margin-top:0">Your plan</h2><p><b>${status}</b></p><p>${note}</p></section>
+      <section class="card"><h2 style="margin-top:0">${PLAN.name}</h2><p><b style="font-size:34px">${PLAN.price}</b> / month</p>
+        <p>AI writes hard case-study questions from your slides, with an explanation for every option and a link back to the slide.</p>
+        <p>Up to ${PLAN.questions} AI questions a month.</p>
+        <button class="p" id="subscribe">${p.k === 'active' ? 'Manage' : 'Subscribe'}</button></section>
+    </div>
+    <p class="fine">Importing decks, attaching slides and studying are always free.</p>`;
   } else if (view === 'settings') {
     const t = theme(), seg = (v, l) => `<button data-theme-set="${v}" class="${t === v ? 'on' : ''}">${l}</button>`;
     body = `<h1 class="pt">Settings</h1><div style="height:20px"></div>${banner}
@@ -959,6 +1122,15 @@ async function home(msg = '') {
   $.querySelectorAll('[data-go]').forEach(b => b.onclick = () => { view = b.dataset.go; home(); });
   $.querySelectorAll('[data-act=newfolder]').forEach(b => b.onclick = () => newFolderDialog(n => home(`Folder "${n}" created.`)));
   $.querySelectorAll('[data-act=adddeck]').forEach(b => b.onclick = () => importDialog(b.dataset.pre || ''));
+  $.querySelectorAll('[data-act=uploadslides]').forEach(b => b.onclick = uploadDialog);
+  $.querySelectorAll('[data-gen]').forEach(b => b.onclick = () => generateDialog(b.dataset.gen));
+  $.querySelectorAll('[data-sv]').forEach(b => b.onclick = () => { slideView = b.dataset.sv; try { localStorage.setItem('slideview', slideView); } catch {} home(); });
+  if (q('#subscribe')) q('#subscribe').onclick = () => modal(`<h2>Online payment is almost ready</h2><p>We're finishing card and wallet payments in EGP. Your trial and your free features keep working in the meantime.</p><div class="row end"><button class="p" id="c">OK</button></div>`, (o, close) => o.querySelector('#c').onclick = close);
+  $.querySelectorAll('[data-delfile]').forEach(b => b.onclick = () => confirmDialog('Remove these slides?', `"${b.dataset.name}" and its extracted text will be deleted. Questions already made from it stay.`, 'Remove', async () => {
+    await sb.storage.from('slides').remove([b.dataset.path, coverPath(b.dataset.path)]);
+    chk(await sb.from('slide_files').delete().eq('id', b.dataset.delfile));
+    home('Slides removed.');
+  }));
 }
 
 // ---- study ----
@@ -1165,6 +1337,7 @@ function signIn() {
 }
 sb.auth.getSession().then(({ data }) => {
   if (!data.session) return signIn();
+  me = data.session.user;
   ready = loadAll();
   ready.catch(e => $.innerHTML = `<div class="page"><p>Couldn't load your data: ${esc(e.message)}</p><button onclick="location.reload()">Try again</button></div>`);
   // zoom follows the account; theme.js only reads localStorage, so mirror it there
