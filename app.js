@@ -1,4 +1,6 @@
 const DAY = 864e5, MIN = 6e4;
+// the publishable key is meant to sit in browser code; row level security decides what it can reach
+const sb = supabase.createClient('https://jfvacwoiwmrbplsodlyk.supabase.co', 'sb_publishable_CFT3niRj-XoY0bLLBw_4Pg_gt66zraO');
 let bkDays = 7;   // backup reminder interval in days, 0 = off
 try { const v = localStorage.getItem('bkdays'); if (v !== null) bkDays = +v; } catch {}
 const $ = document.getElementById('app');
@@ -26,10 +28,56 @@ const tx = async (store, mode, fn) => {
     t.onerror = () => rej(t.error);
   });
 };
-const all = s => tx(s, 'readonly', o => o.getAll());
-const putMany = (s, items) => tx(s, 'readwrite', o => items.forEach(i => o.put(i)));
-const clear = s => tx(s, 'readwrite', o => o.clear());
-const removeCards = ids => tx('cards', 'readwrite', o => ids.forEach(id => o.delete(id)));
+// ---- cloud storage (Supabase) ----
+// Cards, review logs and settings live in the user's account. Everything is loaded once after sign-in and kept in memory;
+// writes go to the database before they resolve. Slide PDFs and their file lists stay on this device for now (IndexedDB below).
+// ponytail: whole account loaded at startup, switch to per-deck loading if accounts get very large
+let cache, ready;
+const chk = r => { if (r.error) throw r.error; return r.data; };
+const chunks = (a, n = 500) => Array.from({ length: Math.ceil(a.length / n) }, (_, i) => a.slice(i * n, i * n + n));
+const fetchAll = async (table, cols, order) => {   // the API returns at most 1000 rows per request
+  const out = [];
+  for (let i = 0; ; i += 1000) { const d = chk(await sb.from(table).select(cols).order(order).range(i, i + 999)); out.push(...d); if (d.length < 1000) return out; }
+};
+const loadAll = async () => {
+  const [decks, qs, logs, meta] = await Promise.all([fetchAll('decks', 'id,name', 'id'), fetchAll('questions', '*', 'id'), fetchAll('review_logs', 'data', 'id'), fetchAll('meta', 'key,value', 'key')]);
+  const name = new Map(decks.map(d => [d.id, d.name]));
+  cache = {
+    deckId: new Map(decks.map(d => [d.name, d.id])),
+    cards: new Map(qs.map(r => [r.key, { ...r.extra, id: r.key, deck: name.get(r.deck_id), stem: r.stem, options: r.options, answer: r.answer, explanation: r.explanation, ease: r.ease, interval: r.interval, due: Number(r.due), reps: r.reps, lapses: r.lapses }])),
+    logs: logs.map(l => l.data),
+    meta: new Map(meta.map(m => [m.key, m.value])),
+  };
+};
+const ensureDecks = async names => {
+  const miss = [...new Set(names)].filter(n => !cache.deckId.has(n));
+  if (!miss.length) return;
+  for (const d of chk(await sb.from('decks').upsert(miss.map(name => ({ name })), { onConflict: 'user_id,name' }).select('id,name'))) cache.deckId.set(d.name, d.id);
+};
+const toRow = c => { const { id, deck, stem, options, answer, explanation, ease, interval, due, reps, lapses, ...extra } = c; return { key: id, deck_id: cache.deckId.get(deck), stem, options, answer, explanation, ease, interval, due, reps, lapses, extra }; };
+const all = async s => { await ready; return s === 'cards' ? [...cache.cards.values()] : [...cache.logs]; };
+async function putMany(s, items) {
+  await ready;
+  if (s === 'cards') {
+    items = [...new Map(items.map(c => [c.id, c])).values()];   // one row per card per request
+    await ensureDecks(items.map(c => c.deck));
+    for (const part of chunks(items)) chk(await sb.from('questions').upsert(part.map(toRow), { onConflict: 'user_id,key' }));
+    items.forEach(c => cache.cards.set(c.id, c));
+  } else {
+    for (const part of chunks(items)) chk(await sb.from('review_logs').insert(part.map(l => ({ at: l.t, data: l }))));
+    cache.logs.push(...items);
+  }
+}
+async function clear(s) {
+  await ready;
+  if (s === 'cards') { chk(await sb.from('questions').delete().neq('key', '')); cache.cards.clear(); }
+  else { chk(await sb.from('review_logs').delete().gte('id', 0)); cache.logs = []; }
+}
+async function removeCards(ids) {
+  await ready;
+  for (const part of chunks(ids, 100)) chk(await sb.from('questions').delete().in('key', part));
+  ids.forEach(id => cache.cards.delete(id));
+}
 // slide PDFs: the bytes live in the "pdfs" store under "deck|id"; the list of files per deck lives in meta under "pdfs:deck".
 // They are NOT part of backups because they can be large.
 const pdfPut = (key, data) => tx('pdfs', 'readwrite', o => o.put(data, key));
@@ -37,8 +85,13 @@ const pdfGet = key => tx('pdfs', 'readonly', o => o.get(key));
 const pdfDel = keys => tx('pdfs', 'readwrite', o => keys.forEach(k => o.delete(k)));
 const metaKeys = () => tx('meta', 'readonly', o => o.getAllKeys()).then(k => k || []);
 
-const getMeta = k => tx('meta', 'readonly', o => o.get(k));
-const setMeta = (k, v) => tx('meta', 'readwrite', o => o.put(v, k));
+// settings go to the account; the per-deck PDF file lists ("pdfs:...") stay on this device next to the PDF bytes
+const onDevice = k => typeof k === 'string' && k.startsWith('pdfs:');
+const getMeta = async k => { if (onDevice(k)) return tx('meta', 'readonly', o => o.get(k)); await ready; return cache.meta.get(k); };
+const setMeta = async (k, v) => {
+  if (onDevice(k)) return tx('meta', 'readwrite', o => o.put(v, k));
+  await ready; chk(await sb.from('meta').upsert({ key: k, value: v }, { onConflict: 'user_id,key' })); cache.meta.set(k, v);
+};
 
 // ---- scheduling (Anki-style SM-2) ----
 // ponytail: SM-2, swap for FSRS if retention tuning matters
@@ -816,6 +869,8 @@ async function home(msg = '') {
         <input type="checkbox" class="tgl" id="snd" ${sound ? 'checked' : ''} aria-label="Sound effects"></div>
       <div class="set"><div><strong>Try the sounds</strong><p>No sound? Turn the iPad volume up and check it isn't muted (the bell icon in Control Center, or the side switch).</p></div>
         <div class="row" style="flex-wrap:nowrap;flex:none"><button id="t-ok">Correct</button><button id="t-no">Wrong</button></div></div>
+      <div class="set"><div><strong>Account</strong><p>Sign out of this device.</p></div>
+        <div class="row"><button id="so">Sign out</button></div></div>
       <div class="set"><div><strong>App walkthrough</strong><p>A quick tour of what ankidote can do.</p></div>
         <div class="row"><button id="wt">Start</button></div></div>
     </section>`;
@@ -880,6 +935,7 @@ async function home(msg = '') {
     show();
   }
   if (q('#wt')) q('#wt').onclick = walkthrough;
+  if (q('#so')) q('#so').onclick = () => sb.auth.signOut().then(() => location.reload());
   if (q('#cp')) q('#cp').onclick = async e => {
     try { await navigator.clipboard.writeText(promptText(pi)); } catch { const r = document.createRange(); r.selectNodeContents(q('#pr')); getSelection().removeAllRanges(); getSelection().addRange(r); document.execCommand('copy'); }
     e.target.textContent = 'Copied';
@@ -888,7 +944,7 @@ async function home(msg = '') {
   if (q('#bkd')) q('#bkd').onchange = e => { bkDays = +e.target.value; try { localStorage.setItem('bkdays', bkDays); } catch {} };
   if (q('#zm')) {   // applied on release, because zooming while dragging would move the slider out from under the finger
     q('#zm').oninput = e => { q('#zv').textContent = e.target.value + '%'; };
-    q('#zm').onchange = e => { const z = e.target.value / 100; try { localStorage.setItem('zoom', z); } catch {} document.documentElement.style.zoom = z; };
+    q('#zm').onchange = e => { const z = e.target.value / 100; try { localStorage.setItem('zoom', z); } catch {} setMeta('zoom', String(z)); document.documentElement.style.zoom = z; };
   }
   $.querySelectorAll('[data-theme-set]').forEach(b => b.onclick = () => { setTheme(b.dataset.themeSet); home(); });
   if (q('#snd')) q('#snd').onchange = e => {
@@ -919,7 +975,11 @@ async function study(sel, practice = false) {
   lastScreen = null;
   const total = queue.length;
   let prevPct = 0;
-  const pinBar = () => { $.querySelectorAll('.snav,.sbar').forEach(b => b.style.left = document.getElementById('nav').offsetWidth + 'px'); };   // the bar is fixed to the screen bottom, beside the sidebar (top bar too)
+  const pinBar = () => $.querySelectorAll('.snav,.sbar').forEach(b => {   // fixed to the screen top/bottom, beside the sidebar; content lines up with the question column (900px at .85 zoom)
+    b.style.left = document.getElementById('nav').offsetWidth + 'px'; b.style.paddingInline = '0';
+    b.style.paddingInline = Math.max(24, (b.clientWidth - 765) / 2) + 'px';
+  });
+  window.onresize = pinBar;
   const hist = [];   // questions answered this session, for looking back at
   const next = () => {
     if (!queue.length) { play('done'); burst(innerWidth / 2, innerHeight * .55, 150, 1.5); return home(`${practice ? 'Practice done' : 'Done'}. ${total} question${total === 1 ? '' : 's'} reviewed.`); };
@@ -1048,7 +1108,11 @@ function walkthrough() {
     if (!last) card.querySelector('#sk').onclick = end;
     setTimeout(() => { // wait for the view to render
       const t = S.s && document.querySelector(S.s); t?.scrollIntoView({ block: 'nearest' });
-      const r = t?.getBoundingClientRect(), ok = r && r.width > 0, W = innerWidth, H = innerHeight, w = card.offsetWidth, h = card.offsetHeight;
+      // interface zoom: rects and fixed-position styles can use different units, so measure the ratio with a probe
+      const pr = document.createElement('div'); pr.style.cssText = 'position:fixed;left:100px;top:0;width:1px;height:1px'; ov.append(pr);
+      const f = pr.getBoundingClientRect().left / 100 || 1; pr.remove();
+      const r0 = t?.getBoundingClientRect(), ok = r0 && r0.width > 0, W = innerWidth / f, H = innerHeight / f, w = card.offsetWidth, h = card.offsetHeight;
+      const r = ok && { left: r0.left / f, right: r0.right / f, top: r0.top / f, bottom: r0.bottom / f, width: r0.width / f, height: r0.height / f };
       let x = (W - w) / 2, y = (H - h) / 2;
       if (ok) {
         Object.assign(hole.style, { left: r.left - 6 + 'px', top: r.top - 6 + 'px', width: r.width + 12 + 'px', height: r.height + 12 + (t.matches('button:not(.nv)') ? 4 : 0) + 'px' }); // buttons have a 4px drop shadow below their box
@@ -1076,5 +1140,34 @@ function splash() {
 
 navigator.storage?.persist?.();
 if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
-home();
-splash();
+function signIn() {
+  document.getElementById('nav').style.display = 'none';
+  $.innerHTML = `<div class="auth">
+    <div class="alogo"><img src="icon-192.png" alt=""><div class="brand">ankidote</div></div>
+    <p class="atag">the antidote to medical exam stress</p>
+    <section class="card acard">
+      <h1>Welcome</h1><p class="asub">Sign in to turn your slides into exam-ready questions.</p>
+      <button class="gbtn" id="g"><svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.5 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.6 5.9c4.4-4.1 7-10.1 7-17.6z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.100 0 24s.9 7.600 2.600 10.800l7.900-6.100z"/><path fill="#34A853" d="M24 48c6.500 0 11.900-2.100 15.900-5.800l-7.600-5.900c-2.100 1.400-4.900 2.300-8.300 2.300-6.300 0-11.600-4-13.500-9.800l-7.900 6.100C6.500 42.600 14.600 48 24 48z"/></svg>Continue with Google</button>
+      <div class="adiv"><span>or</span></div>
+      <input class="inp" id="em" type="email" placeholder="Email address" autocomplete="email">
+      <button class="p" id="ml" style="width:100%">Email me a sign-in link</button>
+      <p id="msg" class="amsg" role="status"></p>
+    </section>
+    <p class="fine">By continuing you agree to the terms and privacy policy. You must be 18 or older.</p></div>`;
+  const msg = t => $.querySelector('#msg').textContent = t;
+  $.querySelector('#g').onclick = () => sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin } });
+  $.querySelector('#ml').onclick = async () => {
+    const email = $.querySelector('#em').value.trim();
+    if (!email) return msg('Type your email first.');
+    const { error } = await sb.auth.signInWithOtp({ email, options: { emailRedirectTo: location.origin } });
+    msg(error ? error.message : 'Check your email for the sign-in link.');
+  };
+}
+sb.auth.getSession().then(({ data }) => {
+  if (!data.session) return signIn();
+  ready = loadAll();
+  ready.catch(e => $.innerHTML = `<div class="page"><p>Couldn't load your data: ${esc(e.message)}</p><button onclick="location.reload()">Try again</button></div>`);
+  // zoom follows the account; theme.js only reads localStorage, so mirror it there
+  ready.then(() => getMeta('zoom')).then(z => { if (z && z !== zoomNow()) { document.documentElement.style.zoom = z; try { localStorage.setItem('zoom', z); } catch {} } }).catch(() => {});
+  home(); splash();
+});

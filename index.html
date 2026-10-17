@@ -548,10 +548,27 @@ body.studying .tbtns,body.studying .hud{display:none}
 .hct2.on{background:var(--accsoft);border-color:var(--acc);color:var(--acc-d);box-shadow:0 3px 0 var(--acc)}
 .sbar{position:fixed;top:0;left:0;right:0;z-index:8;margin:0;padding:max(12px,env(safe-area-inset-top)) max(24px,calc((100% - 900px) / 2)) 12px;background:var(--bg);border-bottom:2px solid var(--line)}
 .study{padding-top:calc(84px + env(safe-area-inset-top))}
+/* sign-in screen */
+.auth{max-width:420px;margin:0 auto;padding-block:6vh;text-align:center;animation:rise .5s cubic-bezier(.2,.7,.2,1) backwards}
+.alogo{display:flex;align-items:center;justify-content:center}
+.alogo img{height:88px;width:auto;aspect-ratio:1;object-fit:contain;border-radius:22%;margin-right:-10px}
+.alogo .brand{font-size:44px;font-weight:900;letter-spacing:-.02em;line-height:1;color:var(--acc)}
+.atag{margin:8px 0 28px;font-weight:700;opacity:.7}
+.acard{text-align:left}
+.acard h1{margin:0 0 4px;font-size:26px;font-weight:900;line-height:1.2}
+.asub{margin:0 0 20px;color:var(--mut);font-size:15px}
+.gbtn{width:100%;display:flex;align-items:center;justify-content:center;gap:10px;background:#fff;color:#1f1f1f;border-color:var(--line);box-shadow:0 4px 0 var(--line)}
+.adiv{display:flex;align-items:center;gap:12px;margin:20px 0;color:var(--mut);font-size:13px;font-weight:800;text-transform:uppercase;letter-spacing:.08em}
+.adiv::before,.adiv::after{content:"";flex:1;border-top:2px solid var(--line)}
+.amsg{min-height:1.4em;margin:14px 0 0;font-size:15px;font-weight:700;color:var(--acc-d);text-align:center}
+.auth .fine{margin-top:20px;font-size:13px}
+.sbar{box-sizing:border-box;min-height:64px;padding-block:max(12px,env(safe-area-inset-top)) 12px}
+.snav{box-sizing:border-box;min-height:70px}
 </style>
 </head>
 <body>
 <div class="shell"><nav id="nav"></nav><main id="app"></main></div>
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.0/dist/umd/supabase.js"></script>
 <script src="app.js"></script>
 </body>
 </html>
