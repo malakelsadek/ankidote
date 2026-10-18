@@ -305,23 +305,52 @@ function setTheme(v) {
 //  - Web Audio is muted by the silent/mute setting, but a playing <audio> element is not. Playing a silent looping one
 //    (and setting the audioSession to "playback") moves the page onto the media channel so the notes are heard.
 //    It only runs for ~2s around each sound so it doesn't hold the audio session (or other apps' music) longer than needed.
-const SILENT_WAV = 'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAQB8AAEAfAAABAAgAZGF0YQAAAAA=';
-async function audioOn() {
-  actx ||= new (window.AudioContext || window.webkitAudioContext)();
+//  - the silent clip needs real samples (an empty one never counts as "playing"), so it's 0.5s of 8-bit silence built here
+//  - after a call/Siri/backgrounding the context can go "interrupted"/"closed" and resume() can hang, so we time it out and rebuild
+const SILENT_WAV = (() => {
+  const n = 4000, b = new Uint8Array(44 + n).fill(128), v = new DataView(b.buffer), s = (o, t) => [...t].forEach((c, i) => b[o + i] = c.charCodeAt(0));
+  s(0, 'RIFF'); v.setUint32(4, 36 + n, true); s(8, 'WAVEfmt '); v.setUint32(16, 16, true); v.setUint16(20, 1, true); v.setUint16(22, 1, true);
+  v.setUint32(24, 8000, true); v.setUint32(28, 8000, true); v.setUint16(32, 1, true); v.setUint16(34, 8, true); s(36, 'data'); v.setUint32(40, n, true);
+  let bin = ''; b.forEach(x => bin += String.fromCharCode(x));
+  return 'data:audio/wav;base64,' + btoa(bin);
+})();
+const mkCtx = () => {
+  const c = new (window.AudioContext || window.webkitAudioContext)();
+  c.onstatechange = () => { if (c.state !== 'running' && c === actx && sound) c.resume().catch(() => {}); };   // iOS "interrupted" after a call/Siri
+  return c;
+};
+const wait = ms => new Promise(r => setTimeout(r, ms));
+let audioQ = Promise.resolve();                           // one audioOn at a time so two quick sounds can't swap the context under each other
+const audioOn = () => audioQ = audioQ.then(async () => {
+  if (actx && actx.state === 'closed') actx = null;
+  actx ||= mkCtx();
   try { if (navigator.audioSession) navigator.audioSession.type = 'playback'; } catch {}
-  if (!keep) { keep = new Audio(SILENT_WAV); keep.loop = true; }
+  if (!keep) { keep = new Audio(SILENT_WAV); keep.loop = true; keep.preload = 'auto'; }
   keep.play().catch(() => {});
   clearTimeout(keepT);
   keepT = setTimeout(() => { keep.pause(); try { if (navigator.audioSession) navigator.audioSession.type = 'auto'; } catch {} }, 2200);
-  if (actx.state !== 'running') await actx.resume();
-}
+  if (actx.state !== 'running') {
+    await Promise.race([actx.resume().catch(() => {}), wait(400)]);
+    if (actx.state !== 'running') {                       // stuck: throw it away and make a fresh one
+      try { actx.close(); } catch {}
+      actx = mkCtx();
+      await Promise.race([actx.resume().catch(() => {}), wait(400)]);
+    }
+  }
+}).catch(() => {});
+// unlock on the first touch (iOS only allows starting audio from a tap), and wake up again when the app returns to the foreground
+// ponytail: we resume on every tap/return rather than tracking exactly which events iOS killed audio on; it's cheap and idempotent
+const wake = () => { if (sound && actx && actx.state !== 'running') audioOn(); };
+['pointerdown', 'touchend', 'keydown'].forEach(e => addEventListener(e, () => { if (sound && !actx) audioOn(); else wake(); }, { passive: true, capture: true }));
+document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
+addEventListener('pageshow', wake);
 async function play(kind) {
   if (!sound) return;
   try {
     await audioOn();
     const out = actx.createGain(); out.gain.value = .9; out.connect(actx.destination);
     const bell = (f, t, len = .55, vol = .5) => {            // sine + 2x + 3x partials, fast attack, long exponential decay
-      const at = actx.currentTime + t;
+      const at = actx.currentTime + t + .03;
       [[1, 1], [2, .35], [3, .12]].forEach(([m, v]) => {
         const o = actx.createOscillator(), g = actx.createGain();
         o.type = 'sine'; o.frequency.value = f * m;
@@ -330,7 +359,7 @@ async function play(kind) {
       });
     };
     const bonk = (f, t) => {                                 // low sine through a lowpass, gentle pitch drop
-      const at = actx.currentTime + t, o = actx.createOscillator(), g = actx.createGain(), lp = actx.createBiquadFilter();
+      const at = actx.currentTime + t + .03, o = actx.createOscillator(), g = actx.createGain(), lp = actx.createBiquadFilter();
       o.type = 'triangle'; o.frequency.setValueAtTime(f, at); o.frequency.exponentialRampToValueAtTime(f * .88, at + .22);
       lp.type = 'lowpass'; lp.frequency.value = 700;
       g.gain.setValueAtTime(.0001, at); g.gain.exponentialRampToValueAtTime(.7, at + .015); g.gain.exponentialRampToValueAtTime(.0001, at + .3);
