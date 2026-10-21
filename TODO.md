@@ -76,6 +76,7 @@ Last updated: 2026-10-17. Nothing below has been pushed to the live site yet (co
 - [x] 2026-10-21: Slide beside the question: label now says "This question comes from slides", and the slide-number buttons, back / forward buttons, caption and corner badge are all larger
 - [x] 2026-10-21: Explanations are structured: the reason the answer is right, then a tidy list "Why the others are wrong" with a lettered row per option, and the correct letter is no longer repeated. Older single-paragraph explanations are split automatically; the Guide prompts and the multi-slide test deck use the new line-per-option layout
 - [x] 2026-10-21: Guide is back to 3 steps: Add a deck now imports the .json and uploads the attached PDFs to your account (cloud) in one go, with progress shown; the separate "Add the slides" step is gone
+- [x] 2026-10-21: Filled in the name and contact email in the privacy policy
 
 ### SQL files, run in this order in Supabase (SQL Editor)
 1. `supabase/schema.sql`
@@ -123,7 +124,7 @@ This is cosmetic and safe: Google shows the address that receives the login, whi
 
 ### Before the first real users
 - [ ] Buy a domain and point it at the site
-- [x] Privacy policy page (`privacy.html`), linked from the sign-in page. Still to do: fill in your name and contact email in it, then write the terms page and link it
+- [x] Privacy policy page (`privacy.html`), linked from the sign-in page. Name and contact email are filled in. Still to do: write the terms page and link it
 - [ ] Terms page (18+; AI can be wrong; not medical advice; you own the right to your slides)
 - [ ] "Report a bad question" button
 - [ ] Supabase Pro (about $25 a month) before real users; check backups are on. Free plan limits (checked 2026-10-21): 1 GB file storage (about 6-10 students with image-heavy lecture PDFs), 5 GB egress a month (every "View slide" downloads the PDF), 500 MB database (enough for dozens of users), projects pause after 1 week of inactivity, no daily backups. Pro: 100 GB storage, 250 GB egress, 8 GB database
