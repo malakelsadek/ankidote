@@ -1,0 +1,174 @@
+{
+  "deck": "Physiology - Homeostasis Multi-Slide Test",
+  "questions": [
+    {
+      "stem": "A student compares two control systems: the rise in insulin release that follows a meal, and the build-up of platelets that follows damage to a vessel wall. Which statement correctly contrasts them?",
+      "options": [
+        "Both are negative feedback loops that return the variable to a set point",
+        "Insulin release is positive feedback because it follows a rise in glucose; clotting is negative feedback because it stops the bleeding",
+        "Both are feed-forward responses that start before the variable changes",
+        "Insulin release is negative feedback, opposing the rise in glucose in proportion to its size; clotting is positive feedback, amplifying itself until the break is sealed",
+        "Clotting is part of normal homeostasis, whereas glucose control is not"
+      ],
+      "answer": 3,
+      "explanation": "Negative feedback changes the system in the opposite direction from the stimulus and the bigger the change the bigger the response, while the clotting loop continues in the same direction as the original stimulus until the tear is sealed.\nA: Clotting does not return anything to a set point; it amplifies.\nB: Insulin opposes the rise in glucose, which is negative feedback, and clotting amplifies, which is positive feedback.\nC: Both responses occur after the change, not before it.\nE: Positive feedback is not part of homeostatic mechanisms and usually controls infrequent events, while glucose control is a homeostatic loop.",
+      "slide": [
+        16,
+        22,
+        23
+      ],
+      "file": "Formation of Body Plan and Homeostasis"
+    },
+    {
+      "stem": "Which row correctly links the hormone, its trigger and its effect on the liver, and the defect in type 2 diabetes mellitus?",
+      "options": [
+        "Glucagon; raised glucose; glycogen formation; type 2 is a failure to make insulin",
+        "Insulin; raised glucose; glycogen formation; type 2 is an insufficient response to insulin",
+        "Insulin; lowered glucose; glycogen breakdown; type 2 is a failure to make glucagon",
+        "Glucagon; lowered glucose; glycogen formation; type 2 is an insufficient response to glucagon",
+        "Insulin; raised glucose; glycogen breakdown; type 2 is an excess of insulin"
+      ],
+      "answer": 1,
+      "explanation": "Insulin is released when glucose rises and promotes conversion of glucose into glycogen in the liver; in type 2 diabetes the problem is an insufficient response to insulin.\nA: Glucagon is released when glucose falls and breaks glycogen down, and failure to make insulin describes type 1.\nC: Insulin is triggered by raised, not lowered, glucose and it forms glycogen.\nD: Glucagon is triggered by lowered glucose and promotes glycogen breakdown, not formation.\nE: Insulin promotes glycogen formation, not breakdown, and type 2 is not an excess of insulin.",
+      "slide": [
+        25,
+        26
+      ],
+      "file": "Formation of Body Plan and Homeostasis"
+    },
+    {
+      "stem": "A man with a viral illness has a core temperature of 38.5 °C. He is shivering and feels cold. Which pair best identifies the effector responses being used and the control centre that has been re-set?",
+      "options": [
+        "Sweating and vasodilation; the thermoreceptors in the skin",
+        "Vasodilation and shivering; the adrenal cortex",
+        "Vasoconstriction and sweating; the thermoreceptors in the hypothalamus",
+        "Sweating and thyroid hormone release; skeletal muscle",
+        "Vasoconstriction, shivering and thyroid hormone release; the preoptic area of the hypothalamus"
+      ],
+      "answer": 4,
+      "explanation": "When body temperature is below the (raised) set point, the control centre in the preoptic area and hypothalamus drives heat conservation and production: vasoconstriction, shivering and thyroid hormones. In fever the temperature controller re-sets to a higher value, so a temperature above 37 °C is still felt as too cold.\nA: Sweating and vasodilation lose heat, and skin thermoreceptors are sensors, not the control centre that is re-set.\nB: Vasodilation loses heat, and the adrenal medulla, not the cortex, is the effector named for temperature.\nC: Sweating loses heat and the hypothalamic receptors are sensors in this loop.\nD: Sweating loses heat and skeletal muscle is an effector, not the control centre.",
+      "slide": [
+        18,
+        19
+      ],
+      "file": "Formation of Body Plan and Homeostasis"
+    },
+    {
+      "stem": "A student is suddenly threatened. Her blood glucose rises sharply even though a rising glucose would normally trigger insulin release. Which statement best explains this and what happens afterwards?",
+      "options": [
+        "Adrenaline from the adrenal glands overrides the usual glucose control and promotes glycogen breakdown; when adrenaline falls the homeostatic controls take over again",
+        "Glucagon is suppressed so glycogen is stored; control resumes immediately",
+        "Insulin is released in excess and breaks down glycogen; control is lost permanently",
+        "The glucose sensor in the pancreas fails; control resumes when the sensor is repaired",
+        "Adrenaline promotes conversion of glucose into glycogen, restoring the set point"
+      ],
+      "answer": 0,
+      "explanation": "In emergencies adrenaline is released to override the homeostatic control of glucose, promoting glycogen breakdown into glucose for fight or flight, and also increases metabolism, breathing and heart rate. Once the emergency is over and adrenaline drops, the usual controls are back in place.\nB: Suppressing glucagon and storing glycogen would lower, not raise, glucose.\nC: Insulin promotes glycogen formation, and control is not lost permanently.\nD: The sensor has not failed; the normal loop is temporarily overridden.\nE: Adrenaline promotes glycogen breakdown, not formation.",
+      "slide": [
+        25,
+        28
+      ],
+      "file": "Formation of Body Plan and Homeostasis"
+    },
+    {
+      "stem": "Before the glucose from a meal has reached the bloodstream, signals from the gut stimulate insulin secretion. How is this best classified, and what is its advantage?",
+      "options": [
+        "Negative feedback, because insulin lowers blood glucose",
+        "Positive feedback, because it amplifies the glucose signal",
+        "Feed-forward: an anticipatory change that readies the system and allows glucose uptake before the variable has moved",
+        "Local, organ-specific homeostasis confined to the gut",
+        "A failure of homeostasis that causes the later rise in glucose"
+      ],
+      "answer": 2,
+      "explanation": "Feed-forward control makes anticipatory changes, here stimulating insulin secretion as we eat (the incretin effect) so that glucose can be taken up when it arrives.\nA: Negative feedback responds to a change that has already happened.\nB: The signal is not amplifying itself in the direction of the stimulus.\nD: The signal prepares a whole-body response, not just the gut.\nE: The response is part of normal control, not a failure.",
+      "slide": [
+        17,
+        21
+      ],
+      "file": "Formation of Body Plan and Homeostasis"
+    },
+    {
+      "stem": "Which statement correctly pairs the levels of homeostatic control with an example, and states what follows when conditions are extreme?",
+      "options": [
+        "Cellular: lung vessels constrict in low oxygen; local: potassium channels open after depolarisation; extreme conditions never affect feedback",
+        "Whole body: only the endocrine system is involved; local: ionic balance; extreme conditions have no effect",
+        "Cellular: blood pressure control; local: potassium channels; extreme conditions improve negative feedback",
+        "Cellular: potassium channels open to restore the resting membrane potential; local: lung vessels constrict in low oxygen; whole body: autonomic, endocrine and behavioural responses; extreme conditions may disable negative feedback and cause disease",
+        "Cellular: adrenaline release; local: blood volume; whole body: lung vessels; extreme conditions only change the set point"
+      ],
+      "answer": 3,
+      "explanation": "After a nerve cell depolarises, potassium channels open to normalise the resting membrane potential (cellular); in a poorly oxygenated part of the lung, vessels constrict to move blood to better oxygenated areas (local); whole-body control combines the autonomic nervous system, endocrine system and behaviour. Homeostasis only works within tolerable limits, and extreme conditions may disable the negative feedback mechanisms, so failure leads to disease.\nA: The two examples are swapped and extreme conditions do affect feedback.\nB: Whole-body control is not endocrine alone and ionic balance is a whole-body example.\nC: Blood pressure is a whole-body example and extreme conditions do not improve feedback.\nE: It mixes up all three levels and ignores loss of control.",
+      "slide": [
+        27,
+        29
+      ],
+      "file": "Formation of Body Plan and Homeostasis"
+    },
+    {
+      "stem": "A 70 kg adult has about 14 L of fluid surrounding the cells. Which statement correctly describes this compartment and why it is kept constant?",
+      "options": [
+        "It is the intracellular fluid, about 28 L, kept constant because cells are surrounded by it",
+        "It is the extracellular fluid, made of plasma and interstitial fluid, with Na+ about 145 mM, K+ about 4 mM, osmolarity about 290 mosm/L and pH about 7.4, kept constant because cells function only while its composition is right",
+        "It is the extracellular fluid with Na+ about 4 mM and K+ about 145 mM, kept constant because it contains most body water",
+        "It is the plasma alone, about 3 L, with an osmolarity of about 150 mosm/L",
+        "It is the interstitial fluid, about 11 L, which is not affected by the composition of plasma"
+      ],
+      "answer": 1,
+      "explanation": "The extracellular fluid (plasma about 3 L plus interstitial fluid about 11 L) is the internal environment, kept at Na+ about 145 mM, K+ about 4 mM, osmolarity about 290 mosm/L and pH 7.4, because cells can live, grow and perform their functions only while the constituents are at the proper concentrations.\nA: Intracellular fluid is the 28 L inside cells.\nC: The sodium and potassium values are reversed and it holds about a third, not most, of body fluid.\nD: Plasma is only about 3 L and 150 mosm/L is not normal.\nE: Interstitial fluid is part of the ECF and exchanges across the capillary membrane with plasma.",
+      "slide": [
+        7,
+        8
+      ],
+      "file": "Formation of Body Plan and Homeostasis"
+    },
+    {
+      "stem": "In a healthy person, blood glucose oscillates within a narrow range after a disturbance instead of swinging widely or sitting at one exact value. Which explanation fits best?",
+      "options": [
+        "Antagonistic effectors (insulin and glucagon) work in constant interplay and the system does not normally overcompensate, so the set point behaves as a range of normal values",
+        "A single effector acts in an all-or-nothing way until the exact set point is reached",
+        "Positive feedback stabilises the variable at the set point",
+        "The set point is fixed at one value and the sensor is perfectly accurate",
+        "Feed-forward control removes the need for any feedback"
+      ],
+      "answer": 0,
+      "explanation": "Antagonistic effectors increase the precision of control and exist as a constant interplay to achieve a normal range; biological systems normally do not overcompensate, and the set point is effectively a range of normal values (for glucose about 4.4 to 6.1 mmol/L).\nB: Effects are not all or nothing.\nC: Positive feedback de-stabilises rather than stabilises.\nD: The set point is a range and the oscillation shows control is not a single exact value.\nE: Feed-forward only anticipates changes; feedback is still needed.",
+      "slide": [
+        19,
+        20
+      ],
+      "file": "Formation of Body Plan and Homeostasis"
+    },
+    {
+      "stem": "Which sequence correctly describes one cycle of a homeostatic control loop?",
+      "options": [
+        "The effector detects the change, the sensor corrects it, and the control centre only records it",
+        "The control centre detects the change and the sensor decides the response",
+        "The sensor sends input along an efferent pathway to the effector, which reports to the control centre",
+        "The effector changes the variable, which then alerts the sensor to produce the stimulus",
+        "A stimulus changes the variable; a sensor detects it; input travels along an afferent pathway to the control centre, which compares it with the set point; output travels along an efferent pathway to the effector; the effector's response feeds back to influence the stimulus"
+      ],
+      "answer": 4,
+      "explanation": "The stimulus changes a variable, the receptor (sensor) detects it, information passes along the afferent pathway to the control (integrating) centre which compares it with the set point and decides the response, output goes along the efferent pathway to the effector, and the effector's response feeds back to influence the size of the stimulus.\nA: The roles of sensor and effector are reversed.\nB: Detection is the sensor's job and the response is decided by the control centre.\nC: Input from the sensor travels along an afferent, not efferent, pathway.\nD: The stimulus is what changes the variable in the first place, not something produced by the sensor.",
+      "slide": [
+        11,
+        12,
+        14
+      ],
+      "file": "Formation of Body Plan and Homeostasis"
+    },
+    {
+      "stem": "How do nerve cells acting as sensors encode information about a controlled variable?",
+      "options": [
+        "By changing the type of neurotransmitter released at the effector",
+        "By switching their resting membrane potential permanently",
+        "Through the frequency of action potentials, and many sensors are specialised ion channels",
+        "Through the amplitude of each action potential, since larger spikes mean larger changes",
+        "By storing the set point inside the sensor and sending it to the effector"
+      ],
+      "answer": 2,
+      "explanation": "Nerve cells encode their information about controlled variables through the frequency of action potentials, and many sensors are specialised ion channels.\nA: The neurotransmitter released at the effector is not how the sensor encodes the variable.\nB: A permanent change in resting potential would not signal changes.\nD: Action potentials are all-or-nothing and carry information by frequency, not size.\nE: The comparison with the set point is done by the integrating centre, not stored in the sensor.",
+      "slide": 15,
+      "file": "Formation of Body Plan and Homeostasis"
+    }
+  ]
+}

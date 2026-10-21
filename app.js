@@ -48,6 +48,12 @@ const loadAll = async () => {
     logs: logs.map(l => l.data),
     meta: new Map(meta.map(m => [m.key, m.value])),
   };
+  await pruneDecks().catch(() => {});
+};
+const pruneDecks = async () => {   // decks with no questions and no slides are invisible leftovers (e.g. from test uploads): remove them
+  const withCards = new Set([...cache.cards.values()].map(c => c.deck));
+  const used = new Set(chk(await sb.from('slide_files').select('deck_id')).map(f => f.deck_id));
+  for (const [n, id] of [...cache.deckId]) if (!withCards.has(n) && !used.has(id)) { chk(await sb.from('decks').delete().eq('id', id)); cache.deckId.delete(n); }
 };
 const ensureDecks = async names => {
   const miss = [...new Set(names)].filter(n => !cache.deckId.has(n));
@@ -154,8 +160,8 @@ async function importFile(file, folder = '') {
   const out = d.questions.map(q => {
     const id = hash(d.deck + '|' + q.stem), old = have.get(id);
     if (!old) added++;
-    const slide = Number.isInteger(q.slide) && q.slide > 0 ? q.slide : 0;
-    return { ease: 2.5, interval: 0, due: 0, reps: 0, lapses: 0, ...old, id, deck: d.deck, stem: q.stem, options: q.options, answer: q.answer, explanation: q.explanation || '', ...(slide ? { slide } : {}) };
+    const slides = [...new Set([].concat(q.slide ?? q.slides ?? []).filter(n => Number.isInteger(n) && n > 0))], slide = slides[0] || 0;   // one slide, or several for a question that needs more
+    return { ease: 2.5, interval: 0, due: 0, reps: 0, lapses: 0, ...old, id, deck: d.deck, stem: q.stem, options: q.options, answer: q.answer, explanation: q.explanation || '', ...(slide ? { slide } : {}), ...(slides.length > 1 ? { slides } : {}), ...(slide && typeof q.file === 'string' && q.file.trim() ? { file: q.file.trim() } : {}) };
   });
   await putMany('cards', out);
   lastDeck = d.deck;
@@ -203,74 +209,47 @@ const COMMON = `- Use only facts from the attached material. Do not invent conte
 - Exactly one best answer per question, with plausible distractors.
 - "answer" is the zero-based index of the correct option (0 = first option, 4 = fifth option).
 - Spread the correct answers evenly. Across the whole set, each position (0, 1, 2, 3 and 4) must be correct about 20% of the time. AI models tend to favour the first three options, so put the correct answer in the 4th and 5th positions just as often as in the first three. Decide the position of the correct answer BEFORE writing each question, avoid patterns or runs of the same position, and do not make the correct option longer or more detailed than the distractors. Check the spread silently before you reply and rebalance if needed.
-- The explanation says why the answer is right and briefly why the main distractors are wrong.
-- If the material is a slide deck or PDF, add "slide": the number of the slide/page the question is based on (a whole number). Leave "slide" out if there is no clear one.`;
+- The "explanation" is a single string with line breaks (
+). Line 1 is one or two sentences on why the correct answer is right. Do NOT repeat the correct letter or its text, and do not write "X is correct". Then one line for EACH wrong option, in this exact form: the letter, a colon, then a short reason it is wrong (for example "A: Glucagon is released when glucose falls, not rises."). Cover every wrong option and never the correct one.
+- If the material is a slide deck or PDF, every question must have "slide": the number of the slide/page (a whole number) that supports the CORRECT answer. If a question genuinely combines ideas from more than one slide, give a list of all of those slide numbers instead, for example "slide": [12, 15, 18] (in the order the reasoning uses them). Only the correct answer is linked to slides; the wrong options are not. Leave "slide" out only if no slide supports it.
+- If more than one file is attached, also add "file": the exact file name of the slide deck or PDF that slide is in.`;
 const DIFF = `- Difficulty: make these hard. The student must reason, not recognise a keyword.
   - Never name the diagnosis, cell, structure, drug class or mechanism in the stem. Describe the case or the defect and make the student work out what it is first.
   - Then ask about a consequence of it (a downstream effect, a mechanism, a complication, what is lost or spared, what happens next). That is two reasoning steps in one question.
   - Every option must be the same kind of thing (all cell types, all mechanisms, all haemodynamic effects) and sound plausible, so only someone who understands the topic can separate them.
   - Do not let the stem or the correct option reuse distinctive words from the explanation of the answer.
   - Style to match, with the options added: "A 4-year-old boy has recurrent opportunistic infections. Genetic testing confirms an inherited defect that completely arrests differentiation at the common lymphoid progenitor stage. Which group of mature cells will be absent while the other haematopoietic lineages are spared?" / "A 62-year-old man with chronic headache, facial plethora and generalised pruritus has an abnormal excess of mature circulating erythrocytes. Which haemodynamic alteration directly results from this?"`;
-const PROMPTS = [
-  ['Standard SBA', 'Clinical vignettes that test understanding. The best default for most material.',
-    `Create single-best-answer (SBA) exam questions from the attached material, in the style of UK medical school exams (NGU).
+const PROMPTS = [   // difficulty levels: [name, description, prompt]
+  ['Easy', 'Short, direct questions on facts, definitions and key terms. Good for a first pass through new material.',
+    `Create EASY single-best-answer exam questions from the attached material.
 
-- Each question is a short clinical vignette (age, sex, presentation, key findings) followed by one question.
-- Exactly 5 options.
-- Test understanding and application, not trivial recall.
-${COMMON}`],
-  ['Quick recall', 'Short one-line questions on facts, definitions and lists. Good for first-pass memorising.',
-    `Create short single-best-answer recall questions from the attached material.
-
-- Each stem is one or two lines: a definition, fact, classification, value or "which of the following" question. No long vignettes.
-- Exactly 5 options.
+- Each stem is one or two lines testing a single fact: a definition, term, value, classification, list or "which of the following" question. No long vignettes.
+- One idea per question. The correct answer should be clear to someone who has read the material once.
+- Exactly 5 options. The wrong options must be clearly different from the right one and from each other, but still belong to the same category.
 - Cover every key fact, definition, number and list in the material.
 ${COMMON}`],
-  ['Mechanisms & science', 'Basic science (physiology, pathology, biochemistry) wrapped in a clinical picture.',
-    `Create single-best-answer questions from the attached material that test the underlying science: mechanisms, physiology, pathophysiology, biochemistry and microbiology.
+  ['Medium', 'Short clinical vignettes that apply one concept. A good default for most revision.',
+    `Create MEDIUM-difficulty single-best-answer exam questions from the attached material, in the style of UK medical school exams (NGU).
 
-- Each question is a short clinical vignette, and the question asks WHY it happens (the mechanism, cause or underlying process), not just what it is.
+- Each question is a short clinical vignette (age, sex, presentation, key findings) followed by one question.
+- The student must apply one concept from the material to the case, not just recall it.
+- Exactly 5 options. Every option is plausible and of the same kind, so the student has to think rather than guess.
+- Name the topic or structure only where it is natural to do so.
+${COMMON}`],
+  ['Difficult', 'Two reasoning steps per question, with plausible options. For when the basics are solid.',
+    `Create DIFFICULT single-best-answer exam questions from the attached material.
+
+- Each question is a clinical vignette ending in a question that needs two reasoning steps.
 - Exactly 5 options.
 ${DIFF}
 ${COMMON}`],
-  ['Pharmacology', 'Drug class, mechanism, indications, side effects, interactions and contraindications.',
-    `Create single-best-answer pharmacology questions from the attached material.
+  ['Extremely hard', 'Multi-step reasoning, integrating several slides, with near-identical options. Harder than the real exam.',
+    `Create EXTREMELY HARD single-best-answer questions from the attached material, much harder than a typical exam. These are for a student who already knows the basics and wants to be stretched.
 
-- Cover drug classes, mechanisms of action, indications, adverse effects, interactions, contraindications, monitoring and key doses where the material gives them.
-- Use short clinical vignettes where possible (for example "which drug is most appropriate" or "which adverse effect would you expect").
-- Exactly 5 options.
-${DIFF}
-${COMMON}`],
-  ['Investigations & management', 'Next best step, first-line treatment, and which test to order.',
-    `Create single-best-answer questions from the attached material on diagnosis and management.
-
-- Each question is a clinical vignette ending in a question such as "What is the most appropriate next investigation?", "What is the most likely diagnosis?" or "What is the first-line management?".
-- Follow UK practice (NICE guidance) when the material does.
-- Exactly 5 options.
-${DIFF}
-${COMMON}`],
-  ['Anatomy', 'Clinical anatomy: relations, nerve and vessel supply, and injuries.',
-    `Create single-best-answer anatomy questions from the attached material.
-
-- Test relations, innervation, blood supply, lymphatic drainage, surface anatomy and the clinical effects of injury or disease.
-- Use short clinical vignettes (for example a nerve injury or an occluded vessel) rather than bare labelling.
-- Exactly 5 options.
-${DIFF}
-${COMMON}`],
-  ['Interpret the data', 'Lab results, ABGs, ECG and imaging findings described in text.',
-    `Create single-best-answer data-interpretation questions from the attached material.
-
-- Each stem gives a short case plus results written as text (blood tests with units and reference ranges, ABG, ECG description, imaging report, observations). The question asks for the diagnosis, cause or next step.
-- Do not rely on images.
-- Exactly 5 options.
-${DIFF}
-${COMMON}`],
-  ['Hard (exam level)', 'Multi-step reasoning with very similar options. For when the basics are solid.',
-    `Create difficult single-best-answer questions from the attached material, harder than a typical exam.
-
-- Each question needs two or more reasoning steps (for example work out the diagnosis, then choose the treatment or complication).
-- Distractors must all be reasonable and differ only subtly. Avoid giveaway wording.
-- Exactly 5 options.
+- Each question needs three or more reasoning steps. For example: work out the underlying condition from the clues, work out the mechanism, then ask about a consequence, an exception or a complication.
+- Where the material allows it, combine ideas from more than one slide or topic in a single question, and list every slide the question draws on in "slide" as a list of numbers.
+- Test the edges of the material: exceptions, limits, what changes when a variable is altered, what is spared and what is lost, and the difference between two similar concepts.
+- Exactly 5 options. All five must be reasonable and differ only subtly, so that a student with a surface understanding is likely to choose a distractor. Avoid any giveaway wording, and never make the correct option the longest or most detailed.
 ${DIFF}
 ${COMMON}`],
 ];
@@ -287,7 +266,7 @@ const countLine = () => qCount
   ? `Write exactly ${qCount} question${qCount === 1 ? '' : 's'}, spread across the whole material, prioritising the most important and most examinable points.`
   : 'Write as many questions as it takes to cover every testable point in the material. Do not stop at a fixed number.';
 const promptText = i => PROMPTS[i][2].replace('{{COUNT}}', countLine()) + '\n\n' + FORMAT;
-let pi = 0;
+let pi = 2;   // Difficult
 
 // ---- settings: sound + theme ----
 let sound = true, actx, keep, keepT;
@@ -344,6 +323,11 @@ const wake = () => { if (sound && actx && actx.state !== 'running') audioOn(); }
 ['pointerdown', 'touchend', 'keydown'].forEach(e => addEventListener(e, () => { if (sound && !actx) audioOn(); else wake(); }, { passive: true, capture: true }));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
 addEventListener('pageshow', wake);
+// subtle tick on any button/toggle; answer choices and the right/wrong buttons have their own sounds
+addEventListener('click', e => {
+  const b = e.target.closest('button, .btn, .tgl, [role=button]');
+  if (b && !b.disabled && !b.matches('.opt, #t-ok, #t-no')) play('tap');
+}, true);
 async function play(kind) {
   if (!sound) return;
   try {
@@ -358,6 +342,12 @@ async function play(kind) {
         o.connect(g).connect(out); o.start(at); o.stop(at + len);
       });
     };
+    const tick = () => {                                     // soft "pop": tiny sine that glides down, ~60ms
+      const at = actx.currentTime + .03, o = actx.createOscillator(), g = actx.createGain();
+      o.frequency.setValueAtTime(900, at); o.frequency.exponentialRampToValueAtTime(520, at + .05);
+      g.gain.setValueAtTime(.0001, at); g.gain.exponentialRampToValueAtTime(.22, at + .004); g.gain.exponentialRampToValueAtTime(.0001, at + .07);
+      o.connect(g).connect(out); o.start(at); o.stop(at + .08);
+    };
     const bonk = (f, t) => {                                 // low sine through a lowpass, gentle pitch drop
       const at = actx.currentTime + t + .03, o = actx.createOscillator(), g = actx.createGain(), lp = actx.createBiquadFilter();
       o.type = 'triangle'; o.frequency.setValueAtTime(f, at); o.frequency.exponentialRampToValueAtTime(f * .88, at + .22);
@@ -365,7 +355,8 @@ async function play(kind) {
       g.gain.setValueAtTime(.0001, at); g.gain.exponentialRampToValueAtTime(.7, at + .015); g.gain.exponentialRampToValueAtTime(.0001, at + .3);
       o.connect(lp).connect(g).connect(out); o.start(at); o.stop(at + .32);
     };
-    if (kind === 'ok') [[784, 0], [988, .075], [1319, .15]].forEach(([f, t]) => bell(f, t, .6, .45));
+    if (kind === 'tap') tick();
+    else if (kind === 'ok') [[784, 0], [988, .075], [1319, .15]].forEach(([f, t]) => bell(f, t, .6, .45));
     else if (kind === 'done') [[523, 0], [659, .1], [784, .2], [1047, .3], [1319, .42]].forEach(([f, t]) => bell(f, t, .8, .4));
     else { bonk(262, 0); bonk(196, .16); }
   } catch {}
@@ -424,8 +415,17 @@ const ICONS = {
   tour: '<path d="M8 5v14l11-7z"/>',
   subscription: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h3"/>',
   generate: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/>',
+  slides: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8 20h8"/>',
   more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
   chev: '<path d="m15 6-6 6 6 6"/>',
+};
+const ICONS_I = {   // pictures for the install steps in the Guide
+  safari: '<circle cx="12" cy="12" r="9"/><path d="m15.500 8.500-2 5-5 2 2-5z"/>',
+  share: '<path d="M12 3v12M8 7l4-4 4 4M6 12H5a2 2 0 0 0-2 2v5a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-5a2 2 0 0 0-2-2h-1"/>',
+  plus: '<rect x="4" y="4" width="16" height="16" rx="3"/><path d="M12 8v8M8 12h8"/>',
+  tick: '<circle cx="12" cy="12" r="9"/><path d="m8 12.500 3 3 5-6"/>',
+  dots: '<circle cx="12" cy="5" r="1.600"/><circle cx="12" cy="12" r="1.600"/><circle cx="12" cy="19" r="1.600"/>',
+  screen: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 7v5m0 0-2-2m2 2 2-2M8 20h8"/>',
 };
 const svg = (p, s = 22) => `<svg viewBox="0 0 24 24" width="${s}" height="${s}" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round">${p}</svg>`;
 const FILL = {
@@ -438,15 +438,16 @@ const fsvg = (k, c, s = 26) => `<svg viewBox="0 0 24 24" width="${s}" height="${
 // signed-in account shown above Settings: profile picture (or an initial) and first name; tapping it opens Settings, where Sign out is
 let me = null;
 const accountBtn = () => {
-  const u = me?.user_metadata || {}, name = u.full_name || u.name || me?.email || 'Account';
-  return `<button class="nv wo acct" data-v="settings" title="${esc(name)}">${u.avatar_url ? `<img class="av" src="${esc(u.avatar_url)}" alt="" referrerpolicy="no-referrer">` : `<i class="av">${esc(name[0].toUpperCase())}</i>`}<span>${esc(name.split(' ')[0])}</span></button>`;
+  const u = me?.user_metadata || {}, name = u.full_name || u.name || me?.email || 'Account', pic = u.avatar_url || u.picture, ini = esc(name[0].toUpperCase());
+  // if Google's picture won't load (blocked, rate-limited, offline) swap in the initial instead of a broken image
+  return `<button class="nv wo acct" data-v="settings" title="${esc(name)}">${pic ? `<img class="av" src="${esc(pic)}" alt="" referrerpolicy="no-referrer" onerror="this.outerHTML='<i class=&quot;av&quot;>${ini}</i>'">` : `<i class="av">${ini}</i>`}<span>${esc(name.split(' ')[0])}</span></button>`;
 };
 function renderNav() {
   const nav = document.getElementById('nav');
   nav.className = min ? 'min' : '';
-  nav.innerHTML = `<div class="brand">${min ? '<img src="icon-192.png" alt="a" width="36" height="36" style="border-radius:9px;display:block;margin:0 auto">' : 'ankidote'}</div>`
-    + [['today', 'Study'], ['folders', 'Folders'], ['decks', 'Decks'], ['stats', 'Stats'], ['generate', 'Generate', 'wo'], ['data', 'Data', 'wo'], ['guide', 'Guide', 'wo'], ['tour', 'Walkthrough', 'wo'], ['subscription', 'Subscription', 'wo'], ['settings', 'Settings', 'wo']].map(([v, l, c = '']) => (v === 'subscription' ? accountBtn() : '') +`<button class="nv ${c} ${v === view ? 'on' : ''}" data-v="${v}" title="${l}">${svg(ICONS[v])}<span>${l}</span></button>`).join('')
-    + `<button class="nv more ${['more', 'generate', 'subscription', 'data', 'guide', 'settings'].includes(view) ? 'on' : ''}" data-v="more" title="More">${svg(ICONS.more)}<span>More</span></button>`
+  nav.innerHTML = `<div class="brand"><img src="icon-192.png" alt="" width="36" height="36" style="border-radius:9px;display:block;flex:none">${min ? '' : '<span>ankidote</span>'}</div>`
+    + [['today', 'Study'], ['stats', 'Stats'], ['folders', 'Folders'], ['decks', 'Decks'], ['slides', 'Slides', 'wo'], ['generate', 'Generate', 'wo'], ['data', 'Data', 'wo'], ['guide', 'Guide', 'wo'], ['subscription', 'Subscription', 'wo'], ['settings', 'Settings', 'wo']].map(([v, l, c = '']) => (v === 'subscription' ? accountBtn() : '') +`<button class="nv ${c} ${v === view ? 'on' : ''}" data-v="${v}" title="${l}">${svg(ICONS[v])}<span>${l}</span></button>`).join('')
+    + `<button class="nv more ${['more', 'slides', 'generate', 'subscription', 'data', 'guide', 'settings'].includes(view) ? 'on' : ''}" data-v="more" title="More">${svg(ICONS.more)}<span>More</span></button>`
     + `<button class="nv tog" id="tog" title="${min ? 'Expand' : 'Minimize'}">${svg(ICONS.chev)}<span>Minimize</span></button>`;
   nav.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { if (b.dataset.v === 'tour') return walkthrough(); view = b.dataset.v; editing = false; if (view === 'today') folder = null; home(); });
   nav.querySelector('#tog').onclick = () => { min = !min; try { localStorage.setItem('navmin', min ? '1' : '0'); } catch {} renderNav(); };
@@ -590,15 +591,27 @@ async function slidesSheet(deck, page = 1, note = '') {
 }
 
 // ---- deleting (progress history in the logs is kept, so streaks and totals survive) ----
+async function removeCloudSlides(d) {   // the deck's slide files and the deck itself; a stored PDF goes too unless another deck still uses it
+  const id = cache.deckId.get(d);
+  if (!id) return;
+  const files = chk(await sb.from('slide_files').select('storage_path').eq('deck_id', id));
+  chk(await sb.from('decks').delete().eq('id', id));   // its slide_files and page text are removed with it
+  cache.deckId.delete(d);
+  for (const p of new Set(files.map(f => f.storage_path))) {
+    const { count } = await sb.from('slide_files').select('id', { count: 'exact', head: true }).eq('storage_path', p);
+    if (!count) await sb.storage.from('slides').remove([p, coverPath(p)]);
+  }
+}
 async function deleteDeck(d) {
   await removeCards((await all('cards')).filter(c => c.deck === d).map(c => c.id));
   await removeDeckPdfs(d);
+  await removeCloudSlides(d);
   delete FM.assign[d]; await saveFM();
 }
 async function deleteFolder(f) {
   const inF = (await all('cards')).filter(c => folderOf(c.deck) === f);
   await removeCards(inF.map(c => c.id));
-  for (const d of new Set(inF.map(c => c.deck))) await removeDeckPdfs(d);
+  for (const d of new Set(inF.map(c => c.deck))) { await removeDeckPdfs(d); await removeCloudSlides(d); }
   FM.folders = FM.folders.filter(x => x !== f);
   for (const k of Object.keys(FM.assign)) if (FM.assign[k] === f) delete FM.assign[k];
   await saveFM();
@@ -688,7 +701,12 @@ function newFolderDialog(done) {
   });
 }
 // ---- plans: 7-day trial with a small AI allowance, then a paid plan (the server enforces this; the app only displays it) ----
-const PLAN = { name: 'AI Plus', price: 'EGP 500', questions: 400 }, TRIAL_GENS = 2, TRIAL_PAGES = 30;
+// features switched off for now: their pages just say "coming soon" (set to false to turn the real page back on)
+const COMING_SOON = { generate: true, subscription: true };
+const soon = title => `<h1 class="pt">${title}</h1><p class="tag">Coming soon</p>`;
+// manual payment until online payments exist: fill these in (InstaPay address to pay, and the form people complete after paying)
+const INSTAPAY = 'YOUR_INSTAPAY_ADDRESS', PAY_FORM = 'YOUR_FORM_LINK';
+const PLAN = { name: 'ankidote Pro', price: 'EGP 500', questions: 400 }, TRIAL_GENS = 2, TRIAL_PAGES = 30;
 const planOf = s => {
   const now = Date.now();
   if (s?.status === 'active' && s.current_period_end && new Date(s.current_period_end) > now) return { k: 'active', until: new Date(s.current_period_end) };
@@ -703,15 +721,162 @@ const signedCovers = async files => {   // file id -> temporary image address ('
   return new Map(files.map((f, i) => [f.id, data?.[i]?.signedUrl || '']));
 };
 const tileBody = (f, cover) => `<span class="scover">${cover ? `<img src="${esc(cover)}" alt="">` : slidesIco()}</span><span class="sname">${esc(f.file_name.replace(/\.pdf$/i, ''))}</span><small>${f.week ? 'Week ' + f.week + ' · ' : ''}${f.page_count} page${f.page_count === 1 ? '' : 's'}</small>`;
-let slideView = 'tiles';
-try { slideView = localStorage.getItem('slideview') || 'tiles'; } catch {}
+let slideDeck = '';   // slideDeck: the deck picked in the Slides tab filter ('' = all)
+
+// explanation: the reason the answer is right, then one line per wrong option. Accepts the new layout (a line per option: "A: ...")
+// and older single-paragraph explanations ("B is correct: ... A is wrong because ...")
+const explainParts = text => {
+  let t = String(text || '').trim(), wrong = [];
+  const line = /^\s*([A-H])\s*[:.)]\s+(.+)$/;
+  if (/\n/.test(t)) {
+    const why = [];
+    for (const l of t.split(/\n+/)) { const m = l.match(line); if (m) wrong.push([m[1], m[2].trim().replace(/^./, c => c.toUpperCase())]); else if (l.trim()) why.push(l.trim()); }
+    t = why.join(' ');
+  } else {
+    const bits = t.split(/\s+(?=[A-H] is (?:wrong|incorrect)\b)/);
+    if (bits.length > 1) {
+      t = bits.shift();
+      for (const b of bits) { const m = b.match(/^([A-H]) is (?:wrong|incorrect)\s*(?:because|as|since|:)?\s*(.+)$/is); if (m) wrong.push([m[1], m[2].charAt(0).toUpperCase() + m[2].slice(1)]); else t += ' ' + b; }
+    }
+  }
+  t = t.replace(/^\s*(?:the\s+)?(?:correct\s+answer\s+is\s+)?[A-H]\s+is\s+correct\s*[:,.\-–]?\s*/i, '').replace(/^\s*correct\s*[:\-–]\s*/i, '');
+  return { why: t.charAt(0).toUpperCase() + t.slice(1), wrong };
+};
+const explainHtml = c => {
+  if (!c.explanation) return '';
+  const { why, wrong } = explainParts(c.explanation);
+  return `<div class="fbe expl">${why ? `<p class="exwhy">${esc(why)}</p>` : ''}${wrong.length ? `<div class="exlbl">Why the others are wrong</div><ul class="exwrong">${wrong.map(([k, x]) => `<li><b>${k}</b><span>${esc(x)}</span></li>`).join('')}</ul>` : ''}</div>`;
+};
+
+// ---- the source slide next to a question (AI questions keep card.sources = [{ file_id, page }]) ----
+let slideMode = 'after';   // off | before (until you answer) | after (once you have answered) | both
+try { slideMode = localStorage.getItem('slidemode') || 'after'; } catch {}
+let slideFileMap;
+const loadSlideFiles = async () => slideFileMap = new Map(chk(await sb.from('slide_files').select('id,file_name,storage_path,deck_id')).map(f => [f.id, f]));
+const slideFile = async id => (slideFileMap?.has(id) ? slideFileMap : await loadSlideFiles()).get(id);
+const slideDocs = new Map();   // file id -> opened pdf, kept for the session; pdf.js fetches only the pages it needs
+const slideDoc = id => {
+  if (!slideDocs.has(id)) slideDocs.set(id, (async () => {
+    const f = await slideFile(id);
+    if (!f) throw new Error('missing file');
+    const { data, error } = await sb.storage.from('slides').createSignedUrl(f.storage_path, 3600);
+    if (error) throw error;
+    await loadPdfjs();
+    return pdfjsLib.getDocument({ url: data.signedUrl }).promise;
+  })().catch(e => { slideDocs.delete(id); throw e; }));
+  return slideDocs.get(id);
+};
+let localPdfLists = new Map();   // deck -> PDFs attached on this device (filled when a study session starts)
+const cardSlides = c => {
+  const own = (Array.isArray(c.sources) ? c.sources : []).filter(x => x?.file_id && x.page > 0);
+  const pages = c.slides?.length ? c.slides : c.slide > 0 ? [c.slide] : [];
+  if (own.length || !pages.length) return own;
+  // imported JSON has only "slide" (a page number) and maybe "file": link it to the PDF attached to the same deck
+  const name = String(c.file || '').toLowerCase().replace(/\.pdf$/, '');
+  const pick = (list, nm) => (name && list.find(x => nm(x).toLowerCase().includes(name))) || (list.length === 1 ? list[0] : null);
+  const did = cache.deckId.get(c.deck), f = pick([...(slideFileMap?.values() || [])].filter(f => f.deck_id === did), f => f.file_name);
+  if (f) return pages.map(page => ({ file_id: f.id, page }));
+  const l = pick(localPdfLists.get(c.deck) || [], l => l.name);
+  return l ? pages.map(page => ({ local: l.id, deck: c.deck, name: l.name, page })) : [];
+};
+const localDocs = new Map();
+const localDoc = async (deck, id) => {
+  const k = pdfKey(deck, id);
+  if (!localDocs.has(k)) localDocs.set(k, (async () => {
+    const data = await pdfGet(k);
+    if (!data) throw new Error('missing file');
+    await loadPdfjs();
+    return pdfjsLib.getDocument({ data: new Uint8Array(data.slice(0)) }).promise;
+  })().catch(e => { localDocs.delete(k); throw e; }));
+  return localDocs.get(k);
+};
+const slideDocOf = x => x.local ? localDoc(x.deck, x.local) : slideDoc(x.file_id);
+async function enlargeSlide(x, title) {   // tap the slide beside a question: the same viewer as "View slide", opened at that page, with back / forward through the whole PDF
+  const o = document.createElement('div');
+  o.className = 'pdfv';
+  o.innerHTML = `<div class="pbar"><button class="x" id="pc" aria-label="Close">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 28)}</button><div class="ptitle"></div></div>
+    <div class="pstage"><canvas id="pcv"></canvas><div class="pmsg" id="pm">Opening slides…</div></div>
+    <div class="pnav"><button id="pp" aria-label="Previous slide">‹</button><span id="pn">–</span><button id="pnx" aria-label="Next slide">›</button></div>`;
+  o.querySelector('.ptitle').textContent = title || '';
+  document.body.appendChild(o);
+  const q = s => o.querySelector(s);
+  let doc, cur = x.page, tok = 0, task;
+  const onKey = e => {
+    e.stopImmediatePropagation();
+    if (e.key === 'Escape') close(); else if (e.key === 'ArrowRight' || e.key === ' ') go(1); else if (e.key === 'ArrowLeft') go(-1);
+  };
+  const close = () => { document.removeEventListener('keydown', onKey, true); removeEventListener('resize', draw); task?.cancel?.(); o.remove(); };   // the pdf stays open: it is shared with the question panel
+  document.addEventListener('keydown', onKey, true);
+  q('#pc').onclick = close;
+  async function draw() {
+    if (!doc) return;
+    const my = ++tok, pg = await doc.getPage(cur), stage = q('.pstage');
+    if (my !== tok) return;
+    const base = pg.getViewport({ scale: 1 });
+    const fit = Math.max(.1, Math.min((stage.clientWidth - 24) / base.width, (stage.clientHeight - 24) / base.height));
+    const dpr = Math.min(devicePixelRatio || 1, 2.5), vp = pg.getViewport({ scale: fit * dpr }), cv = q('#pcv');
+    cv.width = vp.width; cv.height = vp.height; cv.style.width = vp.width / dpr + 'px'; cv.style.height = vp.height / dpr + 'px';
+    task?.cancel?.();
+    task = pg.render({ canvasContext: cv.getContext('2d'), viewport: vp });
+    await task.promise.catch(() => {});
+    if (my === tok) { q('#pn').textContent = `${cur} / ${doc.numPages}`; q('#pm').hidden = true; }
+  }
+  function go(d) { const n = Math.min(doc.numPages, Math.max(1, cur + d)); if (n !== cur) { cur = n; draw(); } }
+  q('#pp').onclick = () => go(-1);
+  q('#pnx').onclick = () => go(1);
+  let x0 = null;
+  q('.pstage').addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
+  q('.pstage').addEventListener('touchend', e => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1); }, { passive: true });
+  addEventListener('resize', draw);
+  try {
+    doc = await slideDocOf(x);
+    cur = Math.min(doc.numPages, Math.max(1, cur));
+    await draw();
+  } catch {
+    q('#pm').textContent = "Couldn't open these slides.";
+  }
+}
+function showSlide(el, c) {   // the card's source slide beside the question; the arrows page through the whole PDF, tapping opens the full viewer
+  const refs = cardSlides(c), x = refs[0], pages = refs.filter(r => r.file_id === x.file_id && r.local === x.local).map(r => r.page);
+  el.innerHTML = `<div class="spbox"><canvas></canvas><span class="spbadge" hidden></span><div class="spmsg">Loading slide…</div></div>
+    ${pages.length > 1 ? `<div class="sprefs"><span>This question comes from slides</span>${pages.map(p => `<button type="button" class="dchip" data-p="${p}">${p}</button>`).join('')}</div>` : ''}
+    <div class="spnav"><button class="spp" aria-label="Previous slide">‹</button><span class="splab"></span><button class="spn" aria-label="Next slide">›</button></div>`;
+  const cv = el.querySelector('canvas'), msg = el.querySelector('.spmsg'), lab = el.querySelector('.splab'), badge = el.querySelector('.spbadge');
+  let page = x.page, tok = 0, task, doc, name = '';
+  const draw = async () => {
+    const my = ++tok;
+    msg.hidden = false; msg.textContent = 'Loading slide…';
+    try {
+      if (!doc) [name, doc] = await Promise.all([x.local ? x.name : slideFile(x.file_id).then(f => f.file_name), slideDocOf(x)]);
+      page = Math.min(doc.numPages, Math.max(1, page));
+      const pg = await doc.getPage(page);
+      if (my !== tok) return;
+      name = name.replace(/\.pdf$/i, '');
+      lab.textContent = `${name} · ${page} / ${doc.numPages}`;
+      badge.textContent = page; badge.hidden = false;
+      el.querySelectorAll('[data-p]').forEach(b => b.classList.toggle('on', +b.dataset.p === page));
+      const base = pg.getViewport({ scale: 1 }), vp = pg.getViewport({ scale: (el.clientWidth || 400) / base.width * Math.min(devicePixelRatio || 1, 2) });
+      cv.width = vp.width; cv.height = vp.height;
+      task?.cancel?.();
+      task = pg.render({ canvasContext: cv.getContext('2d'), viewport: vp });
+      await task.promise;
+      if (my === tok) msg.hidden = true;
+    } catch (e) { if (my === tok && e?.name !== 'RenderingCancelledException') msg.textContent = "Couldn't load this slide."; }
+  };
+  const go = d => { if (!doc) return; const n = Math.min(doc.numPages, Math.max(1, page + d)); if (n !== page) { page = n; draw(); } };
+  el.querySelectorAll('[data-p]').forEach(b => b.onclick = () => { page = +b.dataset.p; draw(); });
+  el.querySelector('.spp').onclick = () => go(-1);
+  el.querySelector('.spn').onclick = () => go(1);
+  cv.onclick = () => { if (doc && msg.hidden) enlargeSlide({ ...x, page }, name); };
+  draw();
+}
 
 // ---- slides in the cloud: PDF goes to private storage, each page's text to the "slides" table (questions are generated from that text) ----
 const MAX_CLOUD_PDF = 50 * 1024 * 1024;   // Supabase free-plan upload limit
-async function uploadSlides(deckName, week, files, say) {
+async function uploadSlides(deckNames, files, say) {
   await loadPdfjs();
-  await ensureDecks([deckName]);
-  const deckId = cache.deckId.get(deckName), uid = (await sb.auth.getUser()).data.user.id, notes = [];
+  await ensureDecks(deckNames);
+  const uid = (await sb.auth.getUser()).data.user.id, notes = [];
   for (const f of files) {
     if (f.size > MAX_CLOUD_PDF) { notes.push(`"${f.name}" is over 50 MB, so it was skipped.`); continue; }
     const doc = await pdfjsLib.getDocument({ data: await f.arrayBuffer() }).promise, pages = [];
@@ -721,7 +886,7 @@ async function uploadSlides(deckName, week, files, say) {
       pages.push(t.items.map(i => i.str).join(' ').replace(/\u0000/g, '').replace(/\s+/g, ' ').trim());
     }
     say(`${f.name}: saving…`);
-    const id = crypto.randomUUID(), path = `${uid}/${id}.pdf`;
+    const path = `${uid}/${crypto.randomUUID()}.pdf`;   // stored once, however many decks it is attached to
     chk(await sb.storage.from('slides').upload(path, f, { contentType: 'application/pdf' }));
     try {   // cover image = first page, stored next to the PDF under the same name with .jpg
       const pg = await doc.getPage(1), w = pg.getViewport({ scale: 1 }).width, vp = pg.getViewport({ scale: 480 / w });
@@ -729,32 +894,36 @@ async function uploadSlides(deckName, week, files, say) {
       await pg.render({ canvasContext: cv.getContext('2d'), viewport: vp }).promise;
       chk(await sb.storage.from('slides').upload(coverPath(path), await new Promise(r => cv.toBlob(r, 'image/jpeg', .8)), { contentType: 'image/jpeg' }));
     } catch {}   // no cover is fine, the tile shows an icon
-    chk(await sb.from('slide_files').insert({ id, deck_id: deckId, file_name: f.name, storage_path: path, week, page_count: doc.numPages }));
-    for (const part of chunks(pages.map((body, i) => ({ file_id: id, page: i + 1, week, body })), 200)) chk(await sb.from('slides').insert(part));
+    for (const deckName of deckNames) {   // each deck gets its own file row and page text, so each can be read and generated from separately
+      const id = crypto.randomUUID();
+      chk(await sb.from('slide_files').insert({ id, deck_id: cache.deckId.get(deckName), file_name: f.name, storage_path: path, page_count: doc.numPages }));
+      for (const part of chunks(pages.map((body, i) => ({ file_id: id, page: i + 1, body })), 200)) chk(await sb.from('slides').insert(part));
+    }
     const blank = pages.filter(t => t.length < 20).length;
     if (blank) notes.push(`${blank} page${blank === 1 ? '' : 's'} in "${f.name}" have almost no text (images only).`);
   }
   return notes;
 }
 function uploadDialog() {
-  const decks = [...new Set([...cache.deckId.keys(), ...[...cache.cards.values()].map(c => c.deck)])].sort();
-  modal(`<h2>Upload slides</h2><p>Name the deck these slides belong to. Use "Subject - Lecture" and it files itself in a folder.</p>
-    <input class="inp" id="dk" list="dks" maxlength="80" placeholder="e.g. Physiology - Body Plan" autocomplete="off">
-    <datalist id="dks">${decks.map(d => `<option value="${esc(d)}">`).join('')}</datalist>
-    <input class="inp" id="wk" type="number" min="1" max="60" placeholder="Week number (optional)">
+  const decks = [...new Set([...cache.cards.values()].map(c => c.deck))].sort();   // the decks you see in the Decks tab
+  modal(`<h2>Upload slides</h2>
     <label class="btn pickpdf">${svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5"/>', 20)} Choose PDFs<input type="file" id="pf" accept="application/pdf,.pdf" multiple hidden></label>
-    <p class="pname" id="pname">Up to 50 MB each.</p>
-    <div class="row end"><button id="c">Cancel</button><button class="p" id="ok">Upload</button></div><p class="err" id="er"></p>`, (o, close) => {
+    <p class="pname" id="pname">Pick as many as you like. Up to 50 MB each.</p>
+    ${decks.length ? `<p style="margin:14px 0 8px"><b>Attach to which decks?</b> Pick one or more.</p>
+      <div class="dpick">${decks.map(d => `<button type="button" class="dchip" data-d="${esc(d)}">${esc(d)}</button>`).join('')}</div>`
+      : '<p style="margin:14px 0 0">You have no decks yet. Add a deck first (Decks tab, then +), then come back to attach slides to it.</p>'}
+    <div class="row end"><button id="c">Cancel</button><button class="p" id="ok" ${decks.length ? '' : 'disabled'}>Upload</button></div><p class="err" id="er"></p>`, (o, close) => {
     const q = s => o.querySelector(s);
     q('#c').onclick = close;
-    q('#pf').onchange = () => { const fs = [...q('#pf').files]; q('#pname').textContent = !fs.length ? 'Up to 50 MB each.' : fs.length === 1 ? `${fs[0].name} (${(fs[0].size / 1048576).toFixed(1)} MB)` : `${fs.length} PDFs selected`; };
+    o.querySelectorAll('.dchip').forEach(b => b.onclick = () => b.classList.toggle('on'));
+    q('#pf').onchange = () => { const fs = [...q('#pf').files]; q('#pname').textContent = !fs.length ? 'Pick as many as you like. Up to 50 MB each.' : fs.length === 1 ? `${fs[0].name} (${(fs[0].size / 1048576).toFixed(1)} MB)` : `${fs.length} PDFs selected`; };
     q('#ok').onclick = async () => {
-      const name = q('#dk').value.trim(), files = [...q('#pf').files], week = parseInt(q('#wk').value, 10) || null;
-      if (!name) { q('#er').textContent = 'Give the deck a name.'; return; }
+      const picked = [...o.querySelectorAll('.dchip.on')].map(b => b.dataset.d), files = [...q('#pf').files];
       if (!files.length) { q('#er').textContent = 'Choose at least one PDF.'; return; }
+      if (!picked.length) { q('#er').textContent = 'Pick at least one deck to attach them to.'; return; }
       q('#ok').disabled = q('#c').disabled = true;
       try {
-        const notes = await uploadSlides(name, week, files, t => q('#er').textContent = t);
+        const notes = await uploadSlides(picked, files, t => q('#er').textContent = t);
         close(); home(['Slides uploaded.', ...notes].join(' '));
       } catch (e) { q('#ok').disabled = q('#c').disabled = false; q('#er').textContent = 'Upload failed: ' + (e.message || e); }
     };
@@ -772,7 +941,7 @@ async function generateDialog(deck) {
   const covers = await signedCovers(files);
   const weeks = [...new Set(files.map(f => f.week).filter(Boolean))].sort((a, b) => a - b);
   modal(`<h2>Generate questions</h2><p>${esc(deck)}. Tap the slides to read. The AI writes hard case-study questions from them, with an explanation for every option.</p>
-    <div class="sgrid gfiles${slideView === 'list' ? ' wide' : ''}">${files.map(f => `<button type="button" class="stile sel" data-fid="${f.id}">${tileBody(f, covers.get(f.id))}</button>`).join('')}</div>
+    <div class="sgrid gfiles">${files.map(f => `<button type="button" class="stile sel" data-fid="${f.id}">${tileBody(f, covers.get(f.id))}</button>`).join('')}</div>
     <div class="gctl">
       ${weeks.length ? `<select class="inp" id="gw"><option value="">Any week</option>${weeks.map(w => `<option value="${w}">Week ${w}</option>`).join('')}</select>` : ''}
       <input class="inp" id="gp1" type="number" min="1" placeholder="From page" disabled><input class="inp" id="gp2" type="number" min="1" placeholder="To page" disabled>
@@ -833,9 +1002,13 @@ async function importDialog(pre = '') {
         folder = folders.find(x => x.toLowerCase() === folder.toLowerCase()) || folder;
       }
       const pdfs = [...q('#pf').files];
-      close();
+      q('#c').disabled = true; q('#er').textContent = 'Importing…';
       let msg = await importFile(f, folder);
-      if (pdfs.length && lastDeck) msg += ' ' + await attachSlides(lastDeck, pdfs);
+      if (pdfs.length && lastDeck) {   // the slides go to the account and are attached to this deck
+        try { msg += ' ' + ['Slides uploaded.', ...await uploadSlides([lastDeck], pdfs, t => q('#er').textContent = t)].join(' '); }
+        catch (err) { msg += ' The slides did not upload: ' + (err.message || err); }
+      }
+      close();
       home(msg);
     };
   });
@@ -905,7 +1078,7 @@ async function home(msg = '') {
   } else if (view === 'more') {
     const row = (v, t, d) => `<button class="morerow" data-go="${v}"><span class="mi">${svg(ICONS[v], 28)}</span><span class="mt"><b>${t}</b><small>${d}</small></span><span class="chv">›</span></button>`;
     body = `<h1 class="pt">More</h1><div style="height:20px"></div>${banner}
-    <div class="morelist">${row('generate', 'Generate', 'Upload slides and write questions with AI')}${row('subscription', 'Subscription', 'Your plan and AI usage')}${row('data', 'Data', 'Import decks and back up your progress')}${row('guide', 'Guide', 'How to make decks with AI')}${row('settings', 'Settings', 'Theme, sounds and reminders')}</div>`;
+    <div class="morelist">${row('slides', 'Slides', 'Your uploaded slides, by deck')}${row('generate', 'Generate', 'Write questions from your slides with AI')}${row('subscription', 'Subscription', 'Your plan and AI usage')}${row('data', 'Data', 'Import decks and back up your progress')}${row('guide', 'Guide', 'How to make decks with AI')}${row('settings', 'Settings', 'Theme, sounds and reminders')}</div>`;
   } else if (view === 'decks') {
     const names = [...new Set(cards.map(c => c.deck))].sort((a, b) => folderOf(a).localeCompare(folderOf(b)) || a.localeCompare(b));
     body = `<div class="toprow"><div><h1 class="pt">All decks</h1><p class="tag">${names.length ? names.length + ' deck' + (names.length === 1 ? '' : 's') + ' · tap one to study it' : 'tap + to add your first deck'}</p></div>
@@ -977,12 +1150,13 @@ async function home(msg = '') {
       : `${nC ? progress : ''}<section class="card empty"><div class="ei">${svg(ICONS.stats, 40)}</div><h3>No answers yet</h3><p>Study a few questions and your stats will show up here.</p></section>`;
     body = `<h1 class="pt">Stats</h1><p class="tag">how you're doing, and where to focus</p><div style="height:18px"></div><div class="stats">${inner}</div>`;
   } else if (view === 'guide') {
+    const plat = /iPad|iPhone|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1) ? 'ios' : /Android/.test(navigator.userAgent) ? 'android' : 'desktop';
     const presets = [0, 10, 20, 30, 50], isCustom = !presets.includes(qCount);
     body = `<h1 class="pt">Guide</h1><p class="tag">make a deck from your material in 3 steps</p><div style="height:18px"></div>${banner}
     <div class="gsteps">
       <section class="card gs"><div class="gn">1</div><div class="gb"><h3>Copy a prompt</h3>
         <div class="gsel">
-          <label>Question type<select class="inp" id="ptype">${PROMPTS.map((p, i) => `<option value="${i}" ${i === pi ? 'selected' : ''}>${esc(p[0])}</option>`).join('')}</select></label>
+          <label>Difficulty<select class="inp" id="ptype">${PROMPTS.map((p, i) => `<option value="${i}" ${i === pi ? 'selected' : ''}>${esc(p[0])}</option>`).join('')}</select></label>
           <label>How many<select class="inp" id="qsel">${presets.map(n => `<option value="${n}" ${n === qCount ? 'selected' : ''}>${n || 'As many as needed'}</option>`).join('')}<option value="custom" ${isCustom ? 'selected' : ''}>Custom…</option></select></label>
         </div>
         <input class="inp" id="qcustom" type="number" min="1" max="200" inputmode="numeric" placeholder="Number of questions (1-200)" value="${isCustom ? qCount : ''}" ${isCustom ? '' : 'hidden'}>
@@ -993,79 +1167,96 @@ async function home(msg = '') {
       <section class="card gs"><div class="gn">2</div><div class="gb"><h3>Ask the AI</h3>
         <p>Open Claude or ChatGPT, attach your slides, notes or PDF, paste the prompt and send. Save the reply as a <b>.json</b> file.</p></div></section>
       <section class="card gs"><div class="gn">3</div><div class="gb"><h3>Import it</h3>
-        <p>Pick a folder and choose the deck file. You can also attach the slides (up to 50 PDFs per deck), so you can open them while studying. Importing the same deck again keeps your progress.</p>
+        <p>Tap <b>Add a deck</b>, choose the .json file and attach your PDF slides in the same window. The deck and its slides are saved to your account, and each question's slide shows beside it after you answer. Importing the same deck again keeps your progress.</p>
         <button class="p" data-act="adddeck">Add a deck</button></div></section>
     </div>
+    <p class="gdesc" style="margin:18px 0 0">Everything lives in your account, so there are no folders to set up and no files to keep track of. Sign in on any device and your decks, slides and progress are there.</p>
     <button id="wt" style="margin:22px 0 18px">Replay the app walkthrough</button>
-    <h2>Keep your files organised</h2>
-    <section class="card"><p class="gdesc" style="margin:0 0 14px">In the <b>Files</b> app (On My iPad or iCloud Drive), set up this structure once:</p>
-      <div class="ftree">
-        <div class="fr">${svg(ICONS.folders, 24)}<b>ankidote</b></div>
-        <div class="fr l1">${svg(ICONS.folders, 22)}<b>decks</b><span>the .json files the AI gives you</span></div>
-        <div class="fr l1">${svg(ICONS.folders, 22)}<b>backups</b><span>exports from the Data tab</span></div>
-        <div class="fr l1">${svg(ICONS.folders, 22)}<b>slides</b><em>optional</em><span>your PDFs, to attach to a deck</span></div>
-      </div>
-      <p class="gdesc" style="margin:14px 0 0">Browsers can't create folders on your iPad for you, so this is a one-time manual setup. When you import or back up, pick files from these folders.</p></section>
-    <h2>Add to Home Screen (iPad)</h2>
-    <section class="card"><ol style="margin:0;padding-left:20px;line-height:1.6">
-      <li>Open this page in <b>Safari</b> (other iPad browsers work too on iPadOS 16.4+).</li>
-      <li>Tap the <b>Share</b> button (square with an up arrow) in the toolbar.</li>
-      <li>Scroll the menu and tap <b>Add to Home Screen</b>.</li>
-      <li>Keep the name, make sure <b>Open as Web App</b> is on if shown, then tap <b>Add</b>.</li>
-    </ol><p class="gdesc" style="margin-top:10px">It then opens full-screen like an app. Your data stays on this iPad, so back up from the Data tab.</p></section>
-    <p class="fine">Study a little every day, and back up now and then from the Data tab.</p>`;
-  } else if (view === 'generate') {
+    <h2>Install it as an app</h2>
+    <p class="gdesc" style="margin:0 0 14px">Puts ankidote on your home screen and opens it full screen, like any other app. Free, and about a minute.</p>
+    <div class="seg2 vtog" style="margin-bottom:14px">${[['ios', 'iPad / iPhone'], ['android', 'Android'], ['desktop', 'Computer']].map(([k, l]) => `<button data-inst="${k}" class="${k === plat ? 'on' : ''}">${l}</button>`).join('')}</div>
+    ${[
+      ['ios', [[ICONS_I.safari, 'Open in Safari', 'Sign in first'], [ICONS_I.share, 'Tap Share', 'Square with an arrow, by the address bar (or ••• first)'], [ICONS_I.plus, 'Add to Home Screen', 'Scroll the menu to find it'], [ICONS_I.tick, 'Tap Add', 'The ankidote icon is on your home screen']]],
+      ['android', [[ICONS_I.safari, 'Open in Chrome', 'Sign in first'], [ICONS_I.dots, 'Tap the ⋮ menu', 'Top corner'], [ICONS_I.plus, 'Install app', 'Or Add to Home screen'], [ICONS_I.tick, 'Confirm', 'The icon appears on your home screen']]],
+      ['desktop', [[ICONS_I.safari, 'Open in Chrome or Edge', 'Sign in first'], [ICONS_I.screen, 'Click the install icon', 'Right end of the address bar'], [ICONS_I.tick, 'Install', 'It opens in its own window']]],
+    ].map(([k, steps]) => `<div class="istepgrid" data-ipanel="${k}" ${k === plat ? '' : 'hidden'}>${steps.map(([ic, t, d], i) => `<div class="istep"><span class="inum">${i + 1}</span><span class="iico">${svg(ic, 34)}</span><b>${t}</b><small>${d}</small></div>`).join('')}</div>`).join('')}
+    <p class="fine" style="margin:14px 0 0">Open it from the new icon. It needs internet, and updates itself when you close it fully and reopen it. To remove it, press and hold the icon.</p>
+    <p class="fine">Study a little every day.</p>`;
+  } else if (view === 'slides' || view === 'generate') {
+    const gen = view === 'generate', locked = gen && !COMING_SOON.generate && planOf((await sb.from('subscriptions').select('*').maybeSingle()).data).k !== 'active';   // AI is for ankidote Pro subscribers
     const files = chk(await sb.from('slide_files').select('id,file_name,week,page_count,storage_path,deck_id').order('file_name'));
     const dn = new Map([...cache.deckId].map(([n, id]) => [id, n])), by = new Map(), covers = await signedCovers(files);
     files.forEach(f => { const n = dn.get(f.deck_id); by.set(n, [...(by.get(n) || []), f]); });
     const del = f => `data-delfile="${f.id}" data-path="${esc(f.storage_path)}" data-name="${esc(f.file_name)}"`;
-    const tiles = fs => `<div class="sgrid">${fs.map(f => `<div class="stile">${tileBody(f, covers.get(f.id))}<button class="sx" ${del(f)} aria-label="Remove ${esc(f.file_name)}">${svg(TRASH_PATH, 18)}</button></div>`).join('')}</div>`;
-    const list = fs => `<section class="card" style="padding-top:6px;padding-bottom:6px">${fs.map(f => `
-      <div class="set"><div><strong>${esc(f.file_name)}</strong><p>${f.week ? 'Week ' + f.week + ' · ' : ''}${f.page_count} page${f.page_count === 1 ? '' : 's'}</p></div>
-        <div class="row"><button ${del(f)}>Remove</button></div></div>`).join('')}</section>`;
-    body = `<div class="toprow"><div style="padding-right:84px"><h1 class="pt">Generate</h1><p class="tag">Turn your slides into exam questions.</p></div>
+    const open = f => `data-open="${f.id}" data-oname="${esc(f.file_name.replace(/\.pdf$/i, ''))}"`;
+    const tiles = fs => `<div class="sgrid">${fs.map(f => `<div class="stile" ${open(f)} role="button" tabindex="0">${tileBody(f, covers.get(f.id))}<button class="sx" ${del(f)} aria-label="Remove ${esc(f.file_name)}">${svg(TRASH_PATH, 18)}</button></div>`).join('')}</div>`;
+    if (!by.has(slideDeck)) slideDeck = '';   // that deck has no slides any more
+    if (!gen) body = `<div class="toprow"><div style="padding-right:84px"><h1 class="pt">Slides</h1><p class="tag">${files.length ? files.length + ' file' + (files.length === 1 ? '' : 's') + ' · tap one to open it' : 'all your uploaded slides, by deck'}</p></div>
       <div class="tbtns"><button class="p plus" data-act="uploadslides" aria-label="Upload slides">${svg('<path d="M12 5v14M5 12h14"/>', 30)}</button></div></div>${banner}
-    ${by.size ? `<div class="seg2 vtog">${[['tiles', 'Tiles'], ['list', 'List']].map(([v, l]) => `<button data-sv="${v}" class="${slideView === v ? 'on' : ''}">${l}</button>`).join('')}</div>` : ''}
-    ${by.size ? [...by].map(([n, fs]) => `<div class="kickrow" style="margin-top:14px"><h2 style="margin:0">${esc(n)}</h2><button class="p" data-gen="${esc(n)}">Generate questions</button></div>${slideView === 'list' ? list(fs) : tiles(fs)}`).join('')
-      : '<p class="tag emptynote" style="font-size:18px;max-width:46ch">No slides yet. Tap + to upload a PDF. You can still add decks the manual way from the Decks tab.</p>'}`;
+    ${by.size ? `<select class="inp" id="sdf" aria-label="Filter by deck" style="margin-bottom:18px"><option value="">All decks</option>${[...by.keys()].map(n => `<option value="${esc(n)}" ${n === slideDeck ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}
+    ${by.size ? [...by].filter(([n]) => !slideDeck || n === slideDeck).map(([n, fs]) => `<h2 style="margin:18px 0 10px">${esc(n)}</h2>${tiles(fs)}`).join('')
+      : '<p class="tag emptynote" style="font-size:18px;max-width:46ch">No slides yet. Tap + to upload a PDF and choose the deck it belongs to.</p>'}`;
+    else body = COMING_SOON.generate ? soon('Generate with AI') : locked ? `<div class="toprow"><div><h1 class="pt">Generate with AI</h1><p class="tag">the AI writes the questions for you, right here</p></div></div>${banner}
+    <section class="card lockcard"><h2 style="margin:0 0 6px">Subscribe to ${PLAN.name}</h2>
+      <p style="margin:0 0 14px">Generating questions with AI is part of ${PLAN.name} (${PLAN.price} a month). Subscribe and the AI will write hard case-study questions from your slides, with an explanation for every option.</p>
+      <button class="p" data-go="subscription">See ${PLAN.name}</button>
+      <p class="fine" style="margin:14px 0 0">Everything else is free: uploading slides, making decks by hand or importing them, and studying.</p></section>` : `<div class="toprow"><div><h1 class="pt">Generate with AI</h1><p class="tag">the AI writes the questions for you, right here</p></div></div>${banner}
+    <section class="card"><p class="gdesc" style="margin:0">Pick a deck, choose which slides to read, and the AI writes hard case-study questions with an explanation for every option. They are added to that deck, ready to study. Nothing to copy, paste or import.</p></section>
+    <div style="height:14px"></div>
+    ${by.size ? [...by].map(([n, fs]) => `<section class="card gdeck"><div><h2 style="margin:0 0 4px">${esc(n)}</h2><p style="margin:0">${fs.length} file${fs.length === 1 ? '' : 's'} · ${fs.reduce((t, f) => t + (f.page_count || 0), 0)} pages</p></div><button class="p" data-gen="${esc(n)}">Generate questions</button></section>`).join('')
+      : '<section class="card"><p style="margin:0 0 14px">No slides yet. Upload your lecture slides first, then come back here.</p><button class="p" data-go="slides">Go to Slides</button></section>'}`;
   } else if (view === 'subscription') {
+    if (COMING_SOON.subscription) body = soon('Subscription');
+    else {
     const [{ data: sub }, { data: us }] = await Promise.all([sb.from('subscriptions').select('*').maybeSingle(), sb.from('usage').select('questions').eq('month', new Date().toISOString().slice(0, 7)).maybeSingle()]);
     const p = planOf(sub), used = us?.questions || 0;
     const status = p.k === 'active' ? `Active until ${p.until.toLocaleDateString()}` : p.k === 'trial' ? `Free trial · ${p.left} day${p.left === 1 ? '' : 's'} left` : 'Free plan';
     const note = p.k === 'active' ? `${used} of ${PLAN.questions} AI questions used this month.`
       : p.k === 'trial' ? `${Math.max(0, p.gens)} of ${TRIAL_GENS} free AI runs left, up to ${TRIAL_PAGES} slide pages each.`
       : 'Your trial has ended. Creating, importing and studying decks is still free. Subscribe to write questions with AI.';
-    body = `<h1 class="pt">Subscription</h1><div style="height:20px"></div>${banner}
-    <div class="two">
-      <section class="card"><h2 style="margin-top:0">Your plan</h2><p><b>${status}</b></p><p>${note}</p></section>
-      <section class="card"><h2 style="margin-top:0">${PLAN.name}</h2><p><b style="font-size:34px">${PLAN.price}</b> / month</p>
-        <p>AI writes hard case-study questions from your slides, with an explanation for every option and a link back to the slide.</p>
-        <p>Up to ${PLAN.questions} AI questions a month.</p>
-        <button class="p" id="subscribe">${p.k === 'active' ? 'Manage' : 'Subscribe'}</button></section>
-    </div>
-    <p class="fine">Importing decks, attaching slides and studying are always free.</p>`;
+    const tick = '<svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="m5 12.500 4.500 4.500L19 7.500"/></svg>';
+    const pill = p.k === 'active' ? ['Active', 'on'] : p.k === 'trial' ? ['Free trial', 'on'] : ['Free plan', ''];
+    const frac = p.k === 'active' ? used / PLAN.questions : p.k === 'trial' ? 1 - Math.max(0, p.gens) / TRIAL_GENS : 0;
+    body = `<div class="subpage"><h1 class="pt">Subscription</h1><p class="tag">Pay only for the AI. Everything else is free.</p><div style="height:20px"></div>${banner}
+    <section class="card subst"><div class="subrow"><span class="pill ${pill[1]}">${pill[0]}</span><b>${status}</b></div>
+      ${p.k === 'free' ? '' : `<div class="meter"><i style="width:${Math.min(100, Math.round(frac * 100))}%;background:var(--acc)"></i></div>`}
+      <p>${note}</p></section>
+    <section class="card plan"><div class="planh"><div><h2>${PLAN.name}</h2><p>Questions from your own slides, written by AI.</p></div>
+        <div class="price"><b>${PLAN.price}</b><small>per month</small></div></div>
+      <ul class="feat">${[`Up to ${PLAN.questions} AI questions a month`, 'Hard case-study questions in exam style', 'An explanation for every answer option', 'A link back to the exact slide each question came from'].map(t => `<li>${tick}<span>${t}</span></li>`).join('')}</ul>
+      <button class="p" id="subscribe">${p.k === 'active' ? 'Renew or manage' : 'Subscribe'}</button></section>
+    <section class="card freecard"><h2>Always free</h2><p>Creating and importing decks, attaching slides, studying, stats and backups never need a plan.</p></section></div>`;
+    }
   } else if (view === 'settings') {
     const t = theme(), seg = (v, l) => `<button data-theme-set="${v}" class="${t === v ? 'on' : ''}">${l}</button>`;
+    const card = (title, rows) => `<h2>${title}</h2><section class="card" style="padding-top:6px;padding-bottom:6px">${rows}</section>`;
     body = `<h1 class="pt">Settings</h1><div style="height:20px"></div>${banner}
-    <h2>Preferences</h2>
-    <section class="card" style="padding-top:6px;padding-bottom:6px">
-      <div class="set"><div><strong>Appearance</strong><p>Light, dark, or follow the iPad.</p></div>
+    ${card('Appearance', `
+      <div class="set"><div><strong>Mode</strong><p>Light, dark, or follow the iPad.</p></div>
         <div class="seg2">${seg('light', 'Light')}${seg('dark', 'Dark')}${seg('auto', 'Auto')}</div></div>
-      <div class="set"><div><strong>Interface size</strong><p>Zoom the whole app in or out.</p></div>
-        <div class="zoomr"><input type="range" id="zm" min="70" max="150" step="5" value="${Math.round(zoomNow() * 100)}" aria-label="Interface size"><b id="zv">${Math.round(zoomNow() * 100)}%</b></div></div>
       <div class="set col"><div><strong>Color theme</strong><p>Pick a palette for the whole app.</p></div>
         <div class="pals">${PALETTES.map(p => `<button class="pal ${p.id === curPalette() ? 'on' : ''}" data-pal="${p.id}" aria-label="${p.label}"><span class="dots"><i style="background:${p.sw[0]}"></i><i style="background:${p.sw[1]}"></i></span>${p.label}</button>`).join('')}</div></div>
-      <div class="set"><div><strong>Backup reminder</strong><p>How often to nudge you to save a backup. Your progress only lives on this iPad.</p></div>
-        <select class="inp" id="bkd" aria-label="Backup reminder">${[[0, 'Off'], [1, 'Every day'], [3, 'Every 3 days'], [7, 'Every week'], [14, 'Every 2 weeks'], [30, 'Every month']].map(([v, l]) => `<option value="${v}" ${v === bkDays ? 'selected' : ''}>${l}</option>`).join('')}</select></div>
-      <div class="set"><div><strong>Sound effects</strong><p>A bright chime for correct, a soft low tone for wrong, and a short fanfare when you finish.</p></div>
+      <div class="set"><div><strong>Interface size</strong><p>Zoom the whole app in or out.</p></div>
+        <div class="zoomr"><input type="range" id="zm" min="70" max="150" step="5" value="${Math.round(zoomNow() * 100)}" aria-label="Interface size"><b id="zv">${Math.round(zoomNow() * 100)}%</b></div></div>`)}
+    ${card('Studying', `
+      <div class="set"><div><strong>Slide next to the question</strong><p>Show the slide a question came from, beside the question.</p></div>
+        <select class="inp" id="slm" aria-label="Slide next to the question">${[['after', 'After answering'], ['before', 'Before answering'], ['both', 'Before and after'], ['off', 'Off']].map(([v, l]) => `<option value="${v}" ${v === slideMode ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`)}
+    ${card('Sound', `
+      <div class="set"><div><strong>Sound effects</strong><p>A soft tick on buttons, a bright chime for correct, a low tone for wrong, and a short fanfare when you finish.</p></div>
         <input type="checkbox" class="tgl" id="snd" ${sound ? 'checked' : ''} aria-label="Sound effects"></div>
-      <div class="set"><div><strong>Try the sounds</strong><p>No sound? Turn the iPad volume up and check it isn't muted (the bell icon in Control Center, or the side switch).</p></div>
-        <div class="row" style="flex-wrap:nowrap;flex:none"><button id="t-ok">Correct</button><button id="t-no">Wrong</button></div></div>
-      <div class="set"><div><strong>Account</strong><p>Sign out of this device.</p></div>
-        <div class="row"><button id="so">Sign out</button></div></div>
+      <div class="set"><div><strong>Try the sounds</strong><p>No sound? Turn the volume up and check the device isn't muted (the bell icon in Control Center, or the side switch).</p></div>
+        <div class="row" style="flex-wrap:nowrap;flex:none"><button id="t-ok">Correct</button><button id="t-no">Wrong</button></div></div>`)}
+    ${card('Backups', `
+      <div class="set"><div><strong>Backup reminder</strong><p>How often to nudge you to save a backup copy. Your decks and progress are already saved in your account.</p></div>
+        <select class="inp" id="bkd" aria-label="Backup reminder">${[[0, 'Off'], [1, 'Every day'], [3, 'Every 3 days'], [7, 'Every week'], [14, 'Every 2 weeks'], [30, 'Every month']].map(([v, l]) => `<option value="${v}" ${v === bkDays ? 'selected' : ''}>${l}</option>`).join('')}</select></div>`)}
+    ${card('Help', `
       <div class="set"><div><strong>App walkthrough</strong><p>A quick tour of what ankidote can do.</p></div>
         <div class="row"><button id="wt">Start</button></div></div>
-    </section>`;
+      <div class="set"><div><strong>Guide</strong><p>How to make decks, add slides and install the app.</p></div>
+        <div class="row"><button data-go="guide">Open</button></div></div>`)}
+    ${card('Account', `
+      <div class="set"><div><strong>Signed in</strong><p>${esc(me?.email || 'Your account')}</p></div>
+        <div class="row"><button id="so">Sign out</button></div></div>`)}`;
   } else {
     body = `<h1 class="pt">Data</h1><div style="height:20px"></div>${banner}
     <div class="two">
@@ -1106,12 +1297,12 @@ async function home(msg = '') {
   $.querySelectorAll('[data-deldeck]').forEach(x => x.onclick = e => {
     e.stopPropagation(); e.preventDefault();
     const d = x.dataset.deldeck, n = cards.filter(c => c.deck === d).length;
-    confirmDialog(`Delete "${lectureOf(d)}"?`, `This removes the deck and its ${n} question${n === 1 ? '' : 's'}, along with your progress on them. This can't be undone.`, 'Delete', async () => { await deleteDeck(d); home(`Deleted "${lectureOf(d)}".`); });
+    confirmDialog(`Delete "${lectureOf(d)}"?`, `This removes the deck, its ${n} question${n === 1 ? '' : 's'} and its slides, along with your progress on them. A PDF that another deck also uses stays there. This can't be undone.`, 'Delete', async () => { await deleteDeck(d); home(`Deleted "${lectureOf(d)}".`); });
   });
   $.querySelectorAll('[data-delfolder]').forEach(x => x.onclick = e => {
     e.stopPropagation(); e.preventDefault();
     const f = x.dataset.delfolder, cs = cards.filter(c => folderOf(c.deck) === f), nd = new Set(cs.map(c => c.deck)).size;
-    confirmDialog(`Delete the "${f}" folder?`, nd ? `This removes the folder, its ${nd} deck${nd === 1 ? '' : 's'} and ${cs.length} question${cs.length === 1 ? '' : 's'}, along with your progress on them. This can't be undone.` : 'This folder is empty, so nothing else is removed.', 'Delete', async () => { await deleteFolder(f); if (folder === f) folder = null; home(`Deleted the "${f}" folder.`); });
+    confirmDialog(`Delete the "${f}" folder?`, nd ? `This removes the folder, its ${nd} deck${nd === 1 ? '' : 's'} and ${cs.length} question${cs.length === 1 ? '' : 's'} and their slides, along with your progress on them. A PDF that another deck also uses stays there. This can't be undone.` : 'This folder is empty, so nothing else is removed.', 'Delete', async () => { await deleteFolder(f); if (folder === f) folder = null; home(`Deleted the "${f}" folder.`); });
   });
   if (q('#pr')) {
     const show = () => { q('#pr').textContent = promptText(pi); q('#pd').textContent = PROMPTS[pi][1]; };
@@ -1133,6 +1324,8 @@ async function home(msg = '') {
     e.target.textContent = 'Copied';
     setTimeout(() => { e.target.textContent = 'Copy prompt'; }, 1500);
   };
+  $.querySelectorAll('[data-inst]').forEach(b => b.onclick = () => { $.querySelectorAll('[data-inst]').forEach(x => x.classList.toggle('on', x === b)); $.querySelectorAll('[data-ipanel]').forEach(p => p.hidden = p.dataset.ipanel !== b.dataset.inst); });
+  if (q('#slm')) q('#slm').onchange = e => { slideMode = e.target.value; try { localStorage.setItem('slidemode', slideMode); } catch {} };
   if (q('#bkd')) q('#bkd').onchange = e => { bkDays = +e.target.value; try { localStorage.setItem('bkdays', bkDays); } catch {} };
   if (q('#zm')) {   // applied on release, because zooming while dragging would move the slider out from under the finger
     q('#zm').oninput = e => { q('#zv').textContent = e.target.value + '%'; };
@@ -1152,12 +1345,20 @@ async function home(msg = '') {
   $.querySelectorAll('[data-act=newfolder]').forEach(b => b.onclick = () => newFolderDialog(n => home(`Folder "${n}" created.`)));
   $.querySelectorAll('[data-act=adddeck]').forEach(b => b.onclick = () => importDialog(b.dataset.pre || ''));
   $.querySelectorAll('[data-act=uploadslides]').forEach(b => b.onclick = uploadDialog);
+  if (q('#sdf')) q('#sdf').onchange = e => { slideDeck = e.target.value; home(); };
+  $.querySelectorAll('[data-open]').forEach(b => b.onclick = e => { if (!e.target.closest('[data-delfile]')) enlargeSlide({ file_id: b.dataset.open, page: 1 }, b.dataset.oname); });
   $.querySelectorAll('[data-gen]').forEach(b => b.onclick = () => generateDialog(b.dataset.gen));
-  $.querySelectorAll('[data-sv]').forEach(b => b.onclick = () => { slideView = b.dataset.sv; try { localStorage.setItem('slideview', slideView); } catch {} home(); });
-  if (q('#subscribe')) q('#subscribe').onclick = () => modal(`<h2>Online payment is almost ready</h2><p>We're finishing card and wallet payments in EGP. Your trial and your free features keep working in the meantime.</p><div class="row end"><button class="p" id="c">OK</button></div>`, (o, close) => o.querySelector('#c').onclick = close);
-  $.querySelectorAll('[data-delfile]').forEach(b => b.onclick = () => confirmDialog('Remove these slides?', `"${b.dataset.name}" and its extracted text will be deleted. Questions already made from it stay.`, 'Remove', async () => {
-    await sb.storage.from('slides').remove([b.dataset.path, coverPath(b.dataset.path)]);
+  if (q('#subscribe')) q('#subscribe').onclick = () => modal(`<h2>Subscribe to ${PLAN.name}</h2>
+    <p>Online payment isn't ready yet, so for now it's two steps:</p>
+    <p><b>1.</b> Send <b>${PLAN.price}</b> by InstaPay to <b>${esc(INSTAPAY)}</b>.</p>
+    <p><b>2.</b> Fill in the form so we can find your payment and switch on your plan. Use the same email you sign in with${me?.email ? ` (<b>${esc(me.email)}</b>)` : ''}.</p>
+    <div class="row end"><button id="c">Close</button><a class="btn p" href="${esc(PAY_FORM)}" target="_blank" rel="noopener">Open the form</a></div>
+    <p class="fine">We switch your plan on by hand after checking the payment, usually within a day.</p>`, (o, close) => o.querySelector('#c').onclick = close);
+  $.querySelectorAll('[data-delfile]').forEach(b => b.onclick = () => confirmDialog('Remove these slides?', `"${b.dataset.name}" is removed from this deck. If other decks use it, they keep it. Questions already made from it stay.`, 'Remove', async () => {
     chk(await sb.from('slide_files').delete().eq('id', b.dataset.delfile));
+    const { count } = await sb.from('slide_files').select('id', { count: 'exact', head: true }).eq('storage_path', b.dataset.path);
+    if (!count) await sb.storage.from('slides').remove([b.dataset.path, coverPath(b.dataset.path)]);   // attached to other decks too? keep the stored PDF
+    await pruneDecks();
     home('Slides removed.');
   }));
 }
@@ -1166,7 +1367,8 @@ async function home(msg = '') {
 // practice = review everything now; never touches the schedule or stats
 async function study(sel, practice = false) {
   document.body.classList.add('studying');
-  const [cards, logs, pdfN] = await Promise.all([all('cards'), all('logs'), pdfCounts()]);
+  const [cards, logs, pdfN] = await Promise.all([all('cards'), all('logs'), pdfCounts(), slideMode === 'off' ? 0 : loadSlideFiles().catch(() => {})]);
+  if (slideMode !== 'off') localPdfLists = new Map((await Promise.all([...new Set(cards.map(c => c.deck))].map(async d => [d, await pdfList(d)]))).filter(([, l]) => l.length));
   const now = Date.now(), pool = sel?.deck ? cards.filter(c => c.deck === sel.deck) : sel?.folder ? cards.filter(c => folderOf(c.deck) === sel.folder) : cards;
   const wrong = wrongIds(logs), due = pool.filter(c => c.reps && c.due <= now).sort((a, b) => a.due - b.due), fresh = pool.filter(c => !c.reps);
   let queue = practice ? pool.map(c => ({ ...c })).sort(() => Math.random() - .5)
@@ -1178,25 +1380,35 @@ async function study(sel, practice = false) {
   let prevPct = 0;
   const pinBar = () => $.querySelectorAll('.snav,.sbar').forEach(b => {   // fixed to the screen top/bottom, beside the sidebar; content lines up with the question column (900px at .85 zoom)
     b.style.left = document.getElementById('nav').offsetWidth + 'px'; b.style.paddingInline = '0';
-    b.style.paddingInline = Math.max(24, (b.clientWidth - 765) / 2) + 'px';
+    b.style.paddingInline = Math.max(24, (b.clientWidth - (innerWidth >= 900 && $.querySelector('.split') ? 1275 : 765)) / 2) + 'px';
   });
   window.onresize = pinBar;
   const hist = [];   // questions answered this session, for looking back at
   const next = () => {
     if (!queue.length) { play('done'); burst(innerWidth / 2, innerHeight * .55, 150, 1.5); return home(`${practice ? 'Practice done' : 'Done'}. ${total} question${total === 1 ? '' : 's'} reviewed.`); };
-    const c = queue[0], isNew = !c.reps, t0 = Date.now();
+    const c = queue[0], isNew = !c.reps, t0 = Date.now(), hasSlide = slideMode !== 'off' && cardSlides(c).length > 0;
     $.innerHTML = `<div class="sbar"><button class="x" id="back" aria-label="Close">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 28)}</button>
         <div class="prog"><i style="width:${prevPct}%"></i></div><span class="cnt">${practice ? 'Practice · ' : ''}${queue.length} left</span><button class="hct2${hideCh ? ' on' : ''}" id="hq" aria-pressed="${hideCh}">Hide choices: ${hideCh ? 'On' : 'Off'}</button></div>
-      <div class="page study">
+      <div class="page study${hasSlide ? ' withslide' : ''}">
       <div class="kick">${isNew ? 'New question' : practice ? 'Practice' : 'Review'}</div>
       <h2 class="qh">Choose the best answer</h2>
-      <p class="stem">${esc(c.stem)}</p>
+      <div class="qgrid"><div class="qcol"><p class="stem">${esc(c.stem)}</p>
       ${hideCh ? '<button class="p" id="rv" style="width:100%;margin-bottom:14px">Show choices</button>' : ''}
       <div id="opts" ${hideCh ? 'hidden' : ''}>${c.options.map((o, i) => `<button class="opt" data-i="${i}"><b>${'ABCDEFGH'[i] || i + 1}</b><span>${esc(o)}</span></button>`).join('')}</div>
       <p class="kbd">A–E to answer · ${practice ? 'Enter to continue' : '1 Again · 2 Hard · 3 Good · 4 Easy · Enter to continue'}</p>
-      <div id="after"></div></div>
+      <div id="after"></div></div>${hasSlide ? '<aside id="sp" class="sp"></aside>' : ''}</div></div>
       <div class="snav"><button id="sb" aria-label="Previous question" ${hist.length ? '' : 'disabled'}>‹ Back</button><span>Current question</span><button id="sf" aria-label="Skip question" ${queue.length > 1 ? '' : 'disabled'}>Skip ›</button></div>`;
     pinBar();
+    const sp = $.querySelector('#sp');
+    const setSlide = answered => {
+      if (!sp) return;
+      const study = $.querySelector('.study'), show = slideMode === 'both' || slideMode === (answered ? 'after' : 'before');
+      // the question sits centered on its own; when the slide shows it slides left and the slide pops in on the right
+      const toggle = () => { study.classList.toggle('split', show); pinBar(); };
+      if (answered && document.startViewTransition && !calm()) document.startViewTransition(toggle); else toggle();
+      if (show) showSlide(sp, c); else sp.innerHTML = '';
+    };
+    setSlide(false);
     const pct = Math.max(0, 100 * (1 - queue.length / total));
     const bar = $.querySelector('.prog i');
     requestAnimationFrame(() => requestAnimationFrame(() => { bar.style.width = pct + '%'; }));
@@ -1223,6 +1435,7 @@ async function study(sel, practice = false) {
     $.querySelectorAll('.opt').forEach(b => b.onclick = () => {
       const pick = +b.dataset.i, correct = pick === c.answer, ms = Date.now() - t0;
       play(correct ? 'ok' : 'no');
+      setSlide(true);
       hist.push({ c, pick, correct }); $.querySelector('.snav').style.display = $.querySelector('#hq').style.display = 'none';   // hide while rating, so it never covers the feedback popup
       if (correct) { const r = b.getBoundingClientRect(); burst(r.left + r.width / 2, r.top + r.height / 2, 24); }
       $.querySelectorAll('.opt').forEach((x, i) => { x.disabled = true; if (i === c.answer) x.classList.add('ok'); else if (i === pick) x.classList.add('no'); });
@@ -1240,14 +1453,11 @@ async function study(sel, practice = false) {
       $.querySelector('#after').innerHTML = `<div class="fb ${correct ? 'ok' : 'no'}">
         <div class="fbh"><span class="fbi">${svg(correct ? '<path d="m5 12.500 4.500 4.500L19 7.500"/>' : '<path d="M6 6l12 12M18 6 6 18"/>')}</span>
           <div><strong>${correct ? praise : 'Not quite'}</strong>${correct ? '' : `<small>Correct answer: ${'ABCDEFGH'[c.answer] || c.answer + 1}. ${esc(c.options[c.answer])}</small>`}</div></div>
-        ${c.explanation ? `<p class="fbe">${esc(c.explanation)}</p>` : ''}
-        ${pdfN.get(c.deck) ? `<button class="slbtn" data-slide="${c.slide || 1}">${slidesIco()} ${c.slide ? 'View slide ' + c.slide : 'View slides'}</button>` : ''}
+        ${explainHtml(c)}
         <div class="row rate">${correct && !practice
           ? ['again', 'hard', 'good', 'easy'].map(r => `<button data-r="${r}" ${r === 'good' ? 'class="p"' : ''}>${r}</button>`).join('')
           : `<button data-r="again" class="p">${correct ? 'Continue' : 'Next'}</button>`}</div>
         ${practice && !correct ? '<p class="hint">Missed ones come back until you get them right.</p>' : ''}</div>`;
-      const sb = $.querySelector('.slbtn');
-      if (sb) sb.onclick = () => pdfN.get(c.deck) === 1 ? openSlides(c.deck, +sb.dataset.slide) : slidesSheet(c.deck, +sb.dataset.slide);
       $.querySelector('.fb').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       $.querySelectorAll('[data-r]').forEach(x => x.onclick = () => rate(x.dataset.r));
     });
@@ -1259,7 +1469,7 @@ async function study(sel, practice = false) {
       <div class="kick">${correct ? 'You got this right' : 'You got this wrong'}</div>
       <p class="stem">${esc(c.stem)}</p>
       <div id="opts">${c.options.map((o, j) => `<button class="opt ${j === c.answer ? 'ok' : j === pick ? 'no' : ''}" disabled><b>${'ABCDEFGH'[j] || j + 1}</b><span>${esc(o)}</span></button>`).join('')}</div>
-      ${c.explanation ? `<div class="fb ${correct ? 'ok' : 'no'}"><p class="fbe" style="margin:0">${esc(c.explanation)}</p></div>` : ''}</div>
+      ${c.explanation ? `<div class="fb ${correct ? 'ok' : 'no'}">${explainHtml(c)}</div>` : ''}</div>
       <div class="snav"><button id="sb" aria-label="Earlier question" ${i ? '' : 'disabled'}>‹ Back</button><span>${i + 1} of ${hist.length} answered</span><button id="sf" aria-label="${last ? 'Back to current question' : 'Later question'}">${last ? 'Current' : 'Forward'} ›</button></div>`;
     pinBar();
     $.querySelector('#back').onclick = () => home();
@@ -1280,8 +1490,8 @@ const TOUR = [
   { s: '[data-v="today"]', v: 'today', h: 'Study', t: 'Your daily questions live here. Missed ones come back sooner, ones you know come back later.' },
   { s: '[data-v="folders"]', v: 'folders', h: 'Folders', t: 'Group your decks by subject. Tap + to create a folder.' },
   { s: '[data-v="decks"]', v: 'decks', h: 'Decks', t: 'Every deck you have imported. Tap one to study it, or tap + to add a new one.' },
-  { s: '#cp', v: 'guide', h: 'Make decks with AI', t: 'Pick a question type, copy the prompt, give it your slides or notes in Claude or ChatGPT, then import the .json it makes.' },
-  { s: '[data-v="data"]', v: 'data', h: 'Data and backups', t: 'Import decks and back up your progress here. Tip: keep an "ankidote" folder in Files with decks, backups and (optional) slides inside.' },
+  { s: '#cp', v: 'guide', h: 'Make decks with AI', t: 'Pick a difficulty, copy the prompt, give it your slides or notes in Claude or ChatGPT, then import the .json it makes.' },
+  { s: '[data-v="data"]', v: 'data', h: 'Data and backups', t: 'Import decks here, and download a backup copy of your progress if you want one. Your decks and progress are already saved in your account.' },
   { s: '[data-v="stats"]', v: 'stats', h: 'Stats', t: 'See your streak and which topics need the most work.' },
   { s: '[data-v="settings"]', v: 'settings', h: 'Settings', t: 'Theme, sounds and backup reminders. You can replay this tour from here or the Guide.' },
   { h: 'Add to Home Screen', t: 'In Safari tap Share, then Add to Home Screen, and ankidote opens full-screen like an app.' },
@@ -1344,8 +1554,7 @@ if ('serviceWorker' in navigator) navigator.serviceWorker.register('sw.js');
 function signIn() {
   document.getElementById('nav').style.display = 'none';
   $.innerHTML = `<div class="auth">
-    <div class="alogo"><img src="icon-192.png" alt=""><div class="brand">ankidote</div></div>
-    <p class="atag">the antidote to medical exam stress</p>
+    <div class="lr" style="margin-bottom:30px"><img class="logo" src="icon-192.png" alt=""><div class="tx"><div class="brand">ankidote</div><p>the antidote to medical exam stress</p></div></div>
     <section class="card acard">
       <h1>Welcome</h1><p class="asub">Sign in to turn your slides into exam-ready questions.</p>
       <button class="gbtn" id="g"><svg width="20" height="20" viewBox="0 0 48 48" aria-hidden="true"><path fill="#EA4335" d="M24 9.5c3.5 0 6.6 1.2 9.1 3.6l6.8-6.8C35.8 2.4 30.3 0 24 0 14.6 0 6.5 5.4 2.6 13.2l7.9 6.1C12.4 13.5 17.7 9.5 24 9.5z"/><path fill="#4285F4" d="M46.5 24.5c0-1.6-.1-3.1-.4-4.5H24v9h12.7c-.6 3-2.3 5.5-4.8 7.2l7.6 5.9c4.4-4.1 7-10.1 7-17.6z"/><path fill="#FBBC05" d="M10.5 28.7c-.5-1.5-.8-3-.8-4.7s.3-3.2.8-4.7l-7.9-6.1C.9 16.4 0 20.100 0 24s.9 7.600 2.600 10.800l7.900-6.100z"/><path fill="#34A853" d="M24 48c6.500 0 11.900-2.100 15.900-5.800l-7.600-5.900c-2.100 1.400-4.900 2.300-8.300 2.300-6.300 0-11.600-4-13.500-9.800l-7.900 6.100C6.500 42.600 14.600 48 24 48z"/></svg>Continue with Google</button>
@@ -1354,7 +1563,7 @@ function signIn() {
       <button class="p" id="ml" style="width:100%">Email me a sign-in link</button>
       <p id="msg" class="amsg" role="status"></p>
     </section>
-    <p class="fine">By continuing you agree to the terms and privacy policy. You must be 18 or older.</p></div>`;
+    <p class="fine">By continuing you agree to the terms and <a href="privacy.html" target="_blank" rel="noopener">privacy policy</a>. You must be 18 or older.</p></div>`;
   const msg = t => $.querySelector('#msg').textContent = t;
   $.querySelector('#g').onclick = () => sb.auth.signInWithOAuth({ provider: 'google', options: { redirectTo: location.origin } });
   $.querySelector('#ml').onclick = async () => {
