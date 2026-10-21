@@ -78,6 +78,14 @@ Last updated: 2026-10-17. Nothing below has been pushed to the live site yet (co
 - [x] 2026-10-21: Guide is back to 3 steps: Add a deck now imports the .json and uploads the attached PDFs to your account (cloud) in one go, with progress shown; the separate "Add the slides" step is gone
 - [x] 2026-10-21: Filled in the name and contact email in the privacy policy
 - [x] 2026-10-21: Added "Managing subscriptions by hand" to this file: columns, how the plan is decided, and SQL to activate, renew, cancel, restart the trial, give back a run, and look people up
+- [x] 2026-10-22: Study screen: the reason for the right answer shows under the right option, and the reason for each wrong option under that option, so nothing covers the choices. The popup is now only the verdict and the Again / Hard / Good / Easy buttons
+- [x] 2026-10-22: Study screen on a wide screen: after answering, the question slides left and a side panel appears with the slide (when there is one) and the rating buttons under it. On a phone the rating bar stays at the bottom
+- [x] 2026-10-22: Study screen: the bottom bar (Back / Next) now stays after you answer; Next does what the main button does (rate Good, or continue after a wrong answer), Back looks at the previous question
+- [x] 2026-10-22: After a right answer, a full-width Next button under Again / Hard / Good / Easy (it rates Good), like the Next after a wrong answer
+- [x] 2026-10-22: Slides tab: Select button to pick several slide files (tap tiles, Select all / Clear) and delete them in one go
+- [x] 2026-10-22: Slides and decks are one thing: all slides go to the account attached to a deck (the old "+ Slides" device-only route is removed, old device PDFs are moved to the account automatically), and renaming a deck keeps its slides (before, the slides stayed under the old name)
+- [x] 2026-10-22: Add a deck (also the Guide's step 3) says so when the slides were not uploaded because the deck did not import
+- [x] 2026-10-21: Added the device-only slides badge problem, the Testing vs Publish decision and the launch order to "Before the first real users"
 
 ### SQL files, run in this order in Supabase (SQL Editor)
 1. `supabase/schema.sql`
@@ -134,6 +142,9 @@ This is cosmetic and safe: Google shows the address that receives the login, whi
 - [ ] Push to the live site: first save an iPad backup (Data, Backup), confirm the live address is in Supabase Redirect URLs and Google JavaScript origins, then sign in on the iPad and import the backup
 - [ ] Test with 5-10 classmates for a week
 - [ ] Offline study (the app currently needs a connection)
+- [x] 2026-10-22: Slides badge on deck tiles now counts the deck's cloud slide files (it used to count PDFs saved only in that browser). Tapping it opens the Slides tab on that deck, or the upload dialog with the deck picked when it has none
+- [ ] Decide launch route: stay in Google Testing (add up to 100 test emails by hand, logins expire after about 7 days) or Publish app (needs domain, privacy and terms pages, Branding filled in). Past 100 people, or to skip adding emails, Publish is required
+- [ ] Order: domain, terms page, Branding and Publish app, Supabase Pro, Claude spend limit, account deletion, live-site push, 5-10 classmate test, then payments and the App Store
 
 ### Payments (EGP)
 - Decision (2026-10-21): the web app uses **Paymob** for payments. App Store in-app subscriptions come later, when the app is wrapped for iOS (Apple requires its own billing inside the iOS app)
@@ -227,7 +238,7 @@ Notes
 - When the Paymob webhook exists it will set `status = 'active'` and `current_period_end` itself, with `provider = 'paymob'`
 
 ## Known limits and notes
-- Slide PDFs attached the old manual way (Decks tab, + Slides) still live on the device only; cloud slides are the Generate page
+- Slides always live in the account and belong to a deck (the database requires a deck). PDFs left on a device from the old manual way are moved into the account on the next start; one over 50 MB stays on the device
 - Folders are stored as one settings row (`fm`), not in the `folders` table yet
 - The function writes at most 10 questions per call (time limit); the app calls it repeatedly
 - It reads at most 60 slide pages per call; image-only slides have no text and are skipped

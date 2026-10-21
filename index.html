@@ -112,12 +112,9 @@ main{flex:1;min-width:0;padding:max(32px,env(safe-area-inset-top)) max(40px,env(
 .fb.no .fbh strong{color:var(--bad)}
 .fbh small{display:block;font-size:17px;font-weight:700;color:var(--bad)}
 .fbe{margin:12px 0 0;font-size:18px;font-weight:600;line-height:1.55}
-.expl .exwhy{margin:0 0 4px;color:var(--fg)}
-.expl .exlbl{margin:16px 0 8px;font-size:13px;font-weight:900;letter-spacing:.06em;text-transform:uppercase;color:var(--mut)}
-.expl .exwrong{list-style:none;margin:0;padding:0;display:grid;gap:8px}
-.expl .exwrong li{display:flex;gap:12px;align-items:flex-start;padding:10px 12px;border-radius:12px;background:rgba(127,127,127,.12)}
-.expl .exwrong li b{flex:none;display:grid;place-items:center;width:26px;height:26px;border-radius:8px;border:2px solid var(--line);font-size:13px}
-.expl .exwrong li span{font-size:16px;font-weight:600}
+.oex{margin:-6px 0 14px;padding:12px 16px;border-radius:14px;background:rgba(127,127,127,.12);font-size:16px;font-weight:600;line-height:1.5}
+.opt.ok+.oex{background:var(--bluesoft)}
+.opt.no+.oex{background:var(--badsoft)}
 .fb .row{margin-top:16px}
 .fb .hint{margin:12px 0 0;font-size:15px;font-weight:700;color:var(--mut)}
 .rate button{flex:1;min-height:56px}
@@ -325,7 +322,7 @@ h2{font-size:22px;margin:30px 0 12px}
 .fbh strong{font-size:21px}
 .fbe{font-size:17px}
 .rate button{min-height:54px;font-size:15px;padding:0 8px}
-#after{bottom:10px}
+#after{bottom:calc(84px + env(safe-area-inset-bottom))}
 .kbd{display:none!important}
 body.studying nav{display:none}
 body.studying main{padding-bottom:24px}
@@ -571,8 +568,8 @@ body.studying main{padding-top:0}
 .spnav{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-top:12px;color:var(--mut);font-size:17px;font-weight:800}
 .spnav .splab{flex:1;text-align:center;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .spnav button{min-height:56px;min-width:76px;padding:0 20px;font-size:28px;line-height:1}
-@media(max-width:899px){.spph{display:none}}
-@media(min-width:900px){.study.split{max-width:1500px}.split .qgrid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:28px;align-items:start}.split .sp{position:sticky;top:calc(96px + env(safe-area-inset-top));animation:spin .4s .1s cubic-bezier(.2,.7,.2,1) backwards}}
+@media(max-width:899px){.spph{display:none}.sp{display:contents}}
+@media(min-width:900px){.study.split{max-width:1500px}.split .qgrid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:28px;align-items:start}.split #after{position:static;margin-top:14px;padding-top:0}.split .sp{position:sticky;top:calc(96px + env(safe-area-inset-top));animation:spin .4s .1s cubic-bezier(.2,.7,.2,1) backwards}}
 @keyframes spin{from{opacity:0;transform:translateX(28px)}}
 .withslide .qcol{view-transition-name:qcol}
 .spbox canvas{cursor:zoom-in}
@@ -617,14 +614,16 @@ body.studying .tbtns,body.studying .hud{display:none}
 .stile .sname{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .stile small{color:var(--mut);font-weight:700}
 .stile .sx{position:absolute;top:16px;right:16px;min-height:0;width:32px;height:32px;padding:0;border-radius:10px;background:var(--card);box-shadow:0 2px 0 var(--line);display:grid;place-items:center;color:var(--mut)}
-button.stile.sel{border-color:var(--acc);box-shadow:0 4px 0 var(--acc)}
-button.stile.sel::after{content:"✓";position:absolute;top:16px;right:16px;width:28px;height:28px;border-radius:50%;background:var(--acc);color:var(--onacc);display:grid;place-items:center;font-size:16px;font-weight:900}
+.stile.sel{border-color:var(--acc);box-shadow:0 4px 0 var(--acc)}
+.stile.sel::after{content:"✓";position:absolute;top:16px;right:16px;width:28px;height:28px;border-radius:50%;background:var(--acc);color:var(--onacc);display:grid;place-items:center;font-size:16px;font-weight:900}
 /* generate dialog: wide, big tiles, controls in one row */
 .sheet:has(.gfiles){width:min(980px,100%);max-height:92vh;overflow:auto;padding:34px}
 .sheet:has(.gfiles) h2{font-size:30px}
 .sheet:has(.gfiles) .gfiles{grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:20px;max-height:52vh;padding:6px 4px 14px}
 .gctl{display:flex;flex-wrap:wrap;gap:12px;margin-top:6px}
 .gctl .inp{flex:1 1 170px;width:auto;margin:0 0 4px}
+.selbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:0 0 18px}
+.selbar span{flex:1;min-width:120px;font-weight:800;color:var(--mut)}
 .sgrid.wide{grid-template-columns:1fr}
 .sheet:has(.gfiles) .sgrid.wide{grid-template-columns:1fr}
 .sgrid.wide .stile{flex-direction:row;align-items:center;gap:12px}

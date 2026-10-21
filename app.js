@@ -84,20 +84,15 @@ async function removeCards(ids) {
   for (const part of chunks(ids, 100)) chk(await sb.from('questions').delete().in('key', part));
   ids.forEach(id => cache.cards.delete(id));
 }
-// slide PDFs: the bytes live in the "pdfs" store under "deck|id"; the list of files per deck lives in meta under "pdfs:deck".
-// They are NOT part of backups because they can be large.
-const pdfPut = (key, data) => tx('pdfs', 'readwrite', o => o.put(data, key));
+// slides used to be kept only in this browser (the "pdfs" store plus a "pdfs:deck" list in meta); migrateDevicePdfs() moves any left into the account
+const pdfKey = (deck, id) => deck + '|' + id;
 const pdfGet = key => tx('pdfs', 'readonly', o => o.get(key));
 const pdfDel = keys => tx('pdfs', 'readwrite', o => keys.forEach(k => o.delete(k)));
 const metaKeys = () => tx('meta', 'readonly', o => o.getAllKeys()).then(k => k || []);
+const deviceMeta = (k, del) => tx('meta', del ? 'readwrite' : 'readonly', o => del ? o.delete(k) : o.get(k));   // read the on-device list, or delete it
 
-// settings go to the account; the per-deck PDF file lists ("pdfs:...") stay on this device next to the PDF bytes
-const onDevice = k => typeof k === 'string' && k.startsWith('pdfs:');
-const getMeta = async k => { if (onDevice(k)) return tx('meta', 'readonly', o => o.get(k)); await ready; return cache.meta.get(k); };
-const setMeta = async (k, v) => {
-  if (onDevice(k)) return tx('meta', 'readwrite', o => o.put(v, k));
-  await ready; chk(await sb.from('meta').upsert({ key: k, value: v }, { onConflict: 'user_id,key' })); cache.meta.set(k, v);
-};
+const getMeta = async k => { await ready; return cache.meta.get(k); };
+const setMeta = async (k, v) => { await ready; chk(await sb.from('meta').upsert({ key: k, value: v }, { onConflict: 'user_id,key' })); cache.meta.set(k, v); };
 
 // ---- scheduling (Anki-style SM-2) ----
 // ponytail: SM-2, swap for FSRS if retention tuning matters
@@ -456,44 +451,7 @@ function renderNav() {
 // ---- folders: "Subject - Lecture" decks are grouped by the part before the dash ----
 const folderSvg = n => `<svg viewBox="0 0 64 64" width="${n}" height="${n}"><path style="fill:var(--acc-d)" d="M6 16a5 5 0 0 1 5-5h14l6 7h22a5 5 0 0 1 5 5v26a5 5 0 0 1-5 5H11a5 5 0 0 1-5-5z"/><path style="fill:var(--acc)" d="M6 27a5 5 0 0 1 5-5h42a5 5 0 0 1 5 5v20a5 5 0 0 1-5 5H11a5 5 0 0 1-5-5z"/></svg>`;
 
-// ---- slide PDFs per deck (up to 50 each) ----
-const MAX_PDFS = 50, MAX_PDF = 150 * 1024 * 1024;
 const TRASH_PATH = '<path d="M4 7h16M10 11v6M14 11v6M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12M9 7V4h6v3"/>';
-const pdfList = async deck => (await getMeta('pdfs:' + deck)) || [];
-const pdfKey = (deck, id) => deck + '|' + id;
-async function pdfCounts() {                                  // Map of deck -> number of PDFs attached
-  const m = new Map();
-  for (const k of (await metaKeys()).filter(k => typeof k === 'string' && k.startsWith('pdfs:'))) {
-    const l = await getMeta(k);
-    if (l && l.length) m.set(k.slice(5), l.length);
-  }
-  return m;
-}
-async function removePdf(deck, id) {
-  await pdfDel([pdfKey(deck, id)]);
-  await setMeta('pdfs:' + deck, (await pdfList(deck)).filter(p => p.id !== id));
-}
-async function removeDeckPdfs(deck) {
-  const l = await pdfList(deck);
-  if (!l.length) return;
-  await pdfDel(l.map(p => pdfKey(deck, p.id)));
-  await setMeta('pdfs:' + deck, []);
-}
-async function attachSlides(deck, files) {
-  const notes = []; let added = 0;
-  for (const f of [...files]) {
-    const list = await pdfList(deck);
-    if (list.length >= MAX_PDFS) { notes.push(`A deck can hold up to ${MAX_PDFS} PDFs.`); break; }
-    if (f.size > MAX_PDF) { notes.push(`"${f.name}" is over 150 MB, so it was skipped.`); continue; }
-    try {
-      const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-      await pdfPut(pdfKey(deck, id), await f.arrayBuffer());
-      await setMeta('pdfs:' + deck, [...list, { id, name: f.name, size: f.size }]);
-      added++;
-    } catch { notes.push("Couldn't save the slides on this device (storage may be full)."); break; }
-  }
-  return [added ? `Attached ${added} PDF${added === 1 ? '' : 's'} to "${lectureOf(deck)}".` : '', ...notes].filter(Boolean).join(' ');
-}
 
 // ---- slide viewer: renders one slide at a time with PDF.js (bundled, so it works offline) ----
 const slidesIco = () => svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5"/>', 18);
@@ -505,91 +463,6 @@ const loadPdfjs = () => pdfjsReady ||= new Promise((res, rej) => {
   el.onerror = () => { pdfjsReady = null; rej(new Error('viewer')); };
   document.head.appendChild(el);
 });
-async function openSlides(deck, page = 1, id = null) {
-  const list = await pdfList(deck), meta = list.find(p => p.id === id) || list[0];
-  if (!meta) { slidesSheet(deck, page); return; }
-  const data = await pdfGet(pdfKey(deck, meta.id));
-  if (!data) return;
-  const o = document.createElement('div');
-  o.className = 'pdfv';
-  o.innerHTML = `<div class="pbar"><button class="x" id="pc" aria-label="Close">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 28)}</button>
-      <div class="ptitle">${esc(meta.name.replace(/\.pdf$/i, ''))}</div><button class="pbtn" id="pmg">${list.length > 1 ? 'All slides' : 'Manage'}</button></div>
-    <div class="pstage"><canvas id="pcv"></canvas><div class="pmsg" id="pm">Opening slides…</div></div>
-    <div class="pnav"><button id="pp" aria-label="Previous slide">‹</button><span id="pn">–</span><button id="pnx" aria-label="Next slide">›</button></div>`;
-  document.body.appendChild(o);
-  const q = s => o.querySelector(s);
-  let doc, cur = 1, tok = 0, task;
-  const onKey = e => {
-    e.stopImmediatePropagation();
-    if (e.key === 'Escape') close(); else if (e.key === 'ArrowRight' || e.key === ' ') go(1); else if (e.key === 'ArrowLeft') go(-1);
-  };
-  const close = () => { document.removeEventListener('keydown', onKey, true); removeEventListener('resize', draw); task?.cancel?.(); o.remove(); doc?.destroy?.(); };
-  document.addEventListener('keydown', onKey, true);
-  q('#pc').onclick = close;
-  q('#pmg').onclick = () => { close(); slidesSheet(deck, page); };
-  async function draw() {
-    if (!doc) return;
-    const my = ++tok, pg = await doc.getPage(cur), stage = q('.pstage');
-    if (my !== tok) return;
-    const base = pg.getViewport({ scale: 1 });
-    const fit = Math.max(.1, Math.min((stage.clientWidth - 24) / base.width, (stage.clientHeight - 24) / base.height));
-    const dpr = Math.min(devicePixelRatio || 1, 2.5), vp = pg.getViewport({ scale: fit * dpr }), cv = q('#pcv');
-    cv.width = vp.width; cv.height = vp.height; cv.style.width = vp.width / dpr + 'px'; cv.style.height = vp.height / dpr + 'px';
-    task?.cancel?.();
-    task = pg.render({ canvasContext: cv.getContext('2d'), viewport: vp });
-    await task.promise.catch(() => {});
-    if (my === tok) { q('#pn').textContent = `${cur} / ${doc.numPages}`; q('#pm').hidden = true; }
-  }
-  function go(d) { const n = Math.min(doc.numPages, Math.max(1, cur + d)); if (n !== cur) { cur = n; draw(); } }
-  q('#pp').onclick = () => go(-1);
-  q('#pnx').onclick = () => go(1);
-  let x0 = null;
-  q('.pstage').addEventListener('touchstart', e => { x0 = e.touches[0].clientX; }, { passive: true });
-  q('.pstage').addEventListener('touchend', e => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1); }, { passive: true });
-  addEventListener('resize', draw);
-  try {
-    await loadPdfjs();
-    doc = await pdfjsLib.getDocument({ data: new Uint8Array(data.slice(0)) }).promise;
-    cur = Math.min(doc.numPages, Math.max(1, page));
-    await draw();
-  } catch {
-    q('#pm').textContent = "Couldn't open these slides. Try removing it and adding the PDF again.";
-  }
-}
-let pendingSlides = null, sheetPage = 1, sheetClose = null;
-const pdfPick = document.createElement('input');
-pdfPick.type = 'file'; pdfPick.accept = 'application/pdf,.pdf'; pdfPick.multiple = true; pdfPick.hidden = true;
-document.body.appendChild(pdfPick);
-const refreshPage = () => document.body.classList.contains('studying') ? Promise.resolve() : home();
-pdfPick.onchange = async () => {
-  const files = [...pdfPick.files], d = pendingSlides; pdfPick.value = '';
-  if (!files.length || !d) return;
-  const note = await attachSlides(d, files);
-  sheetClose?.();
-  await refreshPage();
-  slidesSheet(d, sheetPage, note);
-};
-// the list of PDFs on a deck: view, remove, add more
-async function slidesSheet(deck, page = 1, note = '') {
-  const list = await pdfList(deck);
-  const mb = b => b >= 1048576 ? (b / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(b / 1024)) + ' KB';
-  modal(`<h2>Slides</h2><p>${esc(lectureOf(deck))} · ${list.length} of ${MAX_PDFS} PDFs${page > 1 ? ` · opens at slide ${page}` : ''}</p>
-    ${note ? `<p class="snote">${esc(note)}</p>` : ''}
-    <div class="plist">${list.length ? list.map(p => `<div class="prow"><button class="pview" data-v="${p.id}">${slidesIco()}<span class="pn1">${esc(p.name)}</span><small>${mb(p.size)}</small></button><button class="prm" data-rm="${p.id}" aria-label="Remove ${esc(p.name)}">${svg(TRASH_PATH, 20)}</button></div>`).join('') : '<p class="pempty">No slides yet. Add the PDF (or PDFs) the questions came from.</p>'}</div>
-    <div class="row end"><button id="c">Close</button><button class="p" id="addp" ${list.length >= MAX_PDFS ? 'disabled' : ''}>Add PDFs</button></div>`, (o, close) => {
-    sheetClose = close;
-    o.querySelector('#c').onclick = close;
-    o.querySelector('#addp').onclick = () => { pendingSlides = deck; sheetPage = page; pdfPick.click(); };
-    o.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { close(); openSlides(deck, page, b.dataset.v); });
-    o.querySelectorAll('[data-rm]').forEach(b => b.onclick = () => {
-      const p = list.find(x => x.id === b.dataset.rm);
-      confirmDialog('Remove these slides?', `"${p.name}" is deleted from this device. Your questions stay.`, 'Remove', async () => {
-        await removePdf(deck, p.id); close(); await refreshPage(); slidesSheet(deck, page);
-      });
-    });
-  });
-}
-
 // ---- deleting (progress history in the logs is kept, so streaks and totals survive) ----
 async function removeCloudSlides(d) {   // the deck's slide files and the deck itself; a stored PDF goes too unless another deck still uses it
   const id = cache.deckId.get(d);
@@ -604,14 +477,13 @@ async function removeCloudSlides(d) {   // the deck's slide files and the deck i
 }
 async function deleteDeck(d) {
   await removeCards((await all('cards')).filter(c => c.deck === d).map(c => c.id));
-  await removeDeckPdfs(d);
   await removeCloudSlides(d);
   delete FM.assign[d]; await saveFM();
 }
 async function deleteFolder(f) {
   const inF = (await all('cards')).filter(c => folderOf(c.deck) === f);
   await removeCards(inF.map(c => c.id));
-  for (const d of new Set(inF.map(c => c.deck))) { await removeDeckPdfs(d); await removeCloudSlides(d); }
+  for (const d of new Set(inF.map(c => c.deck))) await removeCloudSlides(d);
   FM.folders = FM.folders.filter(x => x !== f);
   for (const k of Object.keys(FM.assign)) if (FM.assign[k] === f) delete FM.assign[k];
   await saveFM();
@@ -619,15 +491,11 @@ async function deleteFolder(f) {
 
 // ---- renaming (card ids stay the same, so progress is kept) ----
 async function renameDeck(o, n) {
+  await ready;
+  const id = cache.deckId.get(o);   // rename the deck row, not just the cards, so its slides stay attached
+  if (id) { chk(await sb.from('decks').update({ name: n }).eq('id', id)); cache.deckId.delete(o); cache.deckId.set(n, id); }
   await putMany('cards', (await all('cards')).filter(c => c.deck === o).map(c => ({ ...c, deck: n })));
   if (o in FM.assign) { FM.assign[n] = FM.assign[o]; delete FM.assign[o]; await saveFM(); }
-  const list = await pdfList(o);
-  for (const p of list) {
-    const data = await pdfGet(pdfKey(o, p.id));
-    if (data) await pdfPut(pdfKey(n, p.id), data);
-    await pdfDel([pdfKey(o, p.id)]);
-  }
-  if (list.length) { await setMeta('pdfs:' + n, list); await setMeta('pdfs:' + o, []); }
 }
 async function renameFolder(o, n) {
   const decks = new Set((await all('cards')).filter(c => folderOf(c.deck) === o).map(c => c.deck));
@@ -722,6 +590,21 @@ const signedCovers = async files => {   // file id -> temporary image address ('
 };
 const tileBody = (f, cover) => `<span class="scover">${cover ? `<img src="${esc(cover)}" alt="">` : slidesIco()}</span><span class="sname">${esc(f.file_name.replace(/\.pdf$/i, ''))}</span><small>${f.week ? 'Week ' + f.week + ' · ' : ''}${f.page_count} page${f.page_count === 1 ? '' : 's'}</small>`;
 let slideDeck = '';   // slideDeck: the deck picked in the Slides tab filter ('' = all)
+let slideSel = null;   // Slides tab: a Set of selected file ids while selecting, otherwise null
+async function slideCounts() {   // deck name -> number of slide files attached to it
+  await ready;
+  const name = new Map([...cache.deckId].map(([n, id]) => [id, n])), m = new Map();
+  for (const f of chk(await sb.from('slide_files').select('deck_id'))) { const n = name.get(f.deck_id); m.set(n, (m.get(n) || 0) + 1); }
+  return m;
+}
+async function removeSlideFiles(fs) {   // fs: [{ id, path }]; a stored PDF goes too once no deck uses it
+  chk(await sb.from('slide_files').delete().in('id', fs.map(f => f.id)));
+  for (const p of new Set(fs.map(f => f.path))) {
+    const { count } = await sb.from('slide_files').select('id', { count: 'exact', head: true }).eq('storage_path', p);
+    if (!count) await sb.storage.from('slides').remove([p, coverPath(p)]);
+  }
+  await pruneDecks();
+}
 
 // explanation: the reason the answer is right, then one line per wrong option. Accepts the new layout (a line per option: "A: ...")
 // and older single-paragraph explanations ("B is correct: ... A is wrong because ...")
@@ -742,10 +625,10 @@ const explainParts = text => {
   t = t.replace(/^\s*(?:the\s+)?(?:correct\s+answer\s+is\s+)?[A-H]\s+is\s+correct\s*[:,.\-–]?\s*/i, '').replace(/^\s*correct\s*[:\-–]\s*/i, '');
   return { why: t.charAt(0).toUpperCase() + t.slice(1), wrong };
 };
-const explainHtml = c => {
+const oexHtml = (c, i) => {   // shown under an option once answered: why the right one is right, why each other one is wrong
   if (!c.explanation) return '';
-  const { why, wrong } = explainParts(c.explanation);
-  return `<div class="fbe expl">${why ? `<p class="exwhy">${esc(why)}</p>` : ''}${wrong.length ? `<div class="exlbl">Why the others are wrong</div><ul class="exwrong">${wrong.map(([k, x]) => `<li><b>${k}</b><span>${esc(x)}</span></li>`).join('')}</ul>` : ''}</div>`;
+  const { why, wrong } = explainParts(c.explanation), t = i === c.answer ? why : wrong.find(([k]) => k === 'ABCDEFGH'[i])?.[1];
+  return t ? `<div class="fbe oex">${esc(t)}</div>` : '';
 };
 
 // ---- the source slide next to a question (AI questions keep card.sources = [{ file_id, page }]) ----
@@ -766,7 +649,6 @@ const slideDoc = id => {
   })().catch(e => { slideDocs.delete(id); throw e; }));
   return slideDocs.get(id);
 };
-let localPdfLists = new Map();   // deck -> PDFs attached on this device (filled when a study session starts)
 const cardSlides = c => {
   const own = (Array.isArray(c.sources) ? c.sources : []).filter(x => x?.file_id && x.page > 0);
   const pages = c.slides?.length ? c.slides : c.slide > 0 ? [c.slide] : [];
@@ -775,22 +657,8 @@ const cardSlides = c => {
   const name = String(c.file || '').toLowerCase().replace(/\.pdf$/, '');
   const pick = (list, nm) => (name && list.find(x => nm(x).toLowerCase().includes(name))) || (list.length === 1 ? list[0] : null);
   const did = cache.deckId.get(c.deck), f = pick([...(slideFileMap?.values() || [])].filter(f => f.deck_id === did), f => f.file_name);
-  if (f) return pages.map(page => ({ file_id: f.id, page }));
-  const l = pick(localPdfLists.get(c.deck) || [], l => l.name);
-  return l ? pages.map(page => ({ local: l.id, deck: c.deck, name: l.name, page })) : [];
+  return f ? pages.map(page => ({ file_id: f.id, page })) : [];
 };
-const localDocs = new Map();
-const localDoc = async (deck, id) => {
-  const k = pdfKey(deck, id);
-  if (!localDocs.has(k)) localDocs.set(k, (async () => {
-    const data = await pdfGet(k);
-    if (!data) throw new Error('missing file');
-    await loadPdfjs();
-    return pdfjsLib.getDocument({ data: new Uint8Array(data.slice(0)) }).promise;
-  })().catch(e => { localDocs.delete(k); throw e; }));
-  return localDocs.get(k);
-};
-const slideDocOf = x => x.local ? localDoc(x.deck, x.local) : slideDoc(x.file_id);
 async function enlargeSlide(x, title) {   // tap the slide beside a question: the same viewer as "View slide", opened at that page, with back / forward through the whole PDF
   const o = document.createElement('div');
   o.className = 'pdfv';
@@ -829,7 +697,7 @@ async function enlargeSlide(x, title) {   // tap the slide beside a question: th
   q('.pstage').addEventListener('touchend', e => { if (x0 === null) return; const dx = e.changedTouches[0].clientX - x0; x0 = null; if (Math.abs(dx) > 50) go(dx < 0 ? 1 : -1); }, { passive: true });
   addEventListener('resize', draw);
   try {
-    doc = await slideDocOf(x);
+    doc = await slideDoc(x.file_id);
     cur = Math.min(doc.numPages, Math.max(1, cur));
     await draw();
   } catch {
@@ -837,7 +705,7 @@ async function enlargeSlide(x, title) {   // tap the slide beside a question: th
   }
 }
 function showSlide(el, c) {   // the card's source slide beside the question; the arrows page through the whole PDF, tapping opens the full viewer
-  const refs = cardSlides(c), x = refs[0], pages = refs.filter(r => r.file_id === x.file_id && r.local === x.local).map(r => r.page);
+  const refs = cardSlides(c), x = refs[0], pages = refs.filter(r => r.file_id === x.file_id).map(r => r.page);
   el.innerHTML = `<div class="spbox"><canvas></canvas><span class="spbadge" hidden></span><div class="spmsg">Loading slide…</div></div>
     ${pages.length > 1 ? `<div class="sprefs"><span>This question comes from slides</span>${pages.map(p => `<button type="button" class="dchip" data-p="${p}">${p}</button>`).join('')}</div>` : ''}
     <div class="spnav"><button class="spp" aria-label="Previous slide">‹</button><span class="splab"></span><button class="spn" aria-label="Next slide">›</button></div>`;
@@ -847,7 +715,7 @@ function showSlide(el, c) {   // the card's source slide beside the question; th
     const my = ++tok;
     msg.hidden = false; msg.textContent = 'Loading slide…';
     try {
-      if (!doc) [name, doc] = await Promise.all([x.local ? x.name : slideFile(x.file_id).then(f => f.file_name), slideDocOf(x)]);
+      if (!doc) [name, doc] = await Promise.all([slideFile(x.file_id).then(f => f.file_name), slideDoc(x.file_id)]);
       page = Math.min(doc.numPages, Math.max(1, page));
       const pg = await doc.getPage(page);
       if (my !== tok) return;
@@ -904,13 +772,37 @@ async function uploadSlides(deckNames, files, say) {
   }
   return notes;
 }
-function uploadDialog() {
+// slides used to be saved only in this browser: move any left over into the account, attached to their deck, then clear them from the device
+// ponytail: runs on every start until the device is empty; two tabs open at once could upload a file twice
+async function migrateDevicePdfs() {
+  let moved = 0;
+  for (const k of (await metaKeys()).filter(k => typeof k === 'string' && k.startsWith('pdfs:'))) {
+    const deck = k.slice(5);
+    let keep = false;
+    for (const p of (await deviceMeta(k)) || []) {
+      try {
+        const data = await pdfGet(pdfKey(deck, p.id));
+        if (data && !cache.deckId.has(deck)) { keep = true; continue; }   // its deck is not in the account: leave it
+        if (data) {
+          const f = new File([data], p.name, { type: 'application/pdf' });
+          if (f.size > MAX_CLOUD_PDF) { keep = true; continue; }   // too big for the account: leave it on the device rather than lose it
+          await uploadSlides([deck], [f], () => {});
+          moved++;
+        }
+        await pdfDel([pdfKey(deck, p.id)]);
+      } catch { return moved; }   // offline or out of space: try again next start
+    }
+    if (!keep) await deviceMeta(k, true);
+  }
+  return moved;
+}
+function uploadDialog(pre = '') {
   const decks = [...new Set([...cache.cards.values()].map(c => c.deck))].sort();   // the decks you see in the Decks tab
   modal(`<h2>Upload slides</h2>
     <label class="btn pickpdf">${svg('<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8zM14 3v5h5"/>', 20)} Choose PDFs<input type="file" id="pf" accept="application/pdf,.pdf" multiple hidden></label>
     <p class="pname" id="pname">Pick as many as you like. Up to 50 MB each.</p>
     ${decks.length ? `<p style="margin:14px 0 8px"><b>Attach to which decks?</b> Pick one or more.</p>
-      <div class="dpick">${decks.map(d => `<button type="button" class="dchip" data-d="${esc(d)}">${esc(d)}</button>`).join('')}</div>`
+      <div class="dpick">${decks.map(d => `<button type="button" class="dchip${d === pre ? ' on' : ''}" data-d="${esc(d)}">${esc(d)}</button>`).join('')}</div>`
       : '<p style="margin:14px 0 0">You have no decks yet. Add a deck first (Decks tab, then +), then come back to attach slides to it.</p>'}
     <div class="row end"><button id="c">Cancel</button><button class="p" id="ok" ${decks.length ? '' : 'disabled'}>Upload</button></div><p class="err" id="er"></p>`, (o, close) => {
     const q = s => o.querySelector(s);
@@ -1007,7 +899,7 @@ async function importDialog(pre = '') {
       if (pdfs.length && lastDeck) {   // the slides go to the account and are attached to this deck
         try { msg += ' ' + ['Slides uploaded.', ...await uploadSlides([lastDeck], pdfs, t => q('#er').textContent = t)].join(' '); }
         catch (err) { msg += ' The slides did not upload: ' + (err.message || err); }
-      }
+      } else if (pdfs.length) msg += ' The slides were not uploaded because no deck was added. Try again.';
       close();
       home(msg);
     };
@@ -1020,7 +912,8 @@ async function home(msg = '') {
   document.body.classList.remove('studying');
   renderNav();
   await loadFM();
-  const [cards, logs, last, pdfN] = await Promise.all([all('cards'), all('logs'), getMeta('lastBackup'), pdfCounts()]);
+  if (view !== 'slides') slideSel = null;
+  const [cards, logs, last, slideN] = await Promise.all([all('cards'), all('logs'), getMeta('lastBackup'), view === 'decks' || view === 'today' ? slideCounts() : new Map()]);
   const now = Date.now(), today = dayKey(now);
   const stale = bkDays && logs.length && (!last || now - last > bkDays * DAY);
   const banner = `${stale ? `<div class="banner"><span>No backup ${last ? 'for ' + Math.floor((now - last) / DAY) + ' days' : 'yet'}.</span><button id="bk">Back up</button></div>` : ''}
@@ -1030,7 +923,7 @@ async function home(msg = '') {
   const delBadge = (attr, v) => editing ? `<span class="del" data-${attr}="${esc(v)}" role="button" aria-label="Delete">${trash}</span>` : '';
   const renBadge = (attr, v) => editing ? `<span class="ren" data-${attr}="${esc(v)}" role="button" aria-label="Rename">${svg('<path d="M4 20h4L19 9l-4-4L4 16zM13.500 6.500l4 4"/>', 20)}</span>` : '';
   const editBtn = `<button class="edit${editing ? ' on' : ''}" data-act="edit">${editing ? 'Done' : 'Edit'}</button>`;
-  const slidesChip = d => { const n = pdfN.get(d) || 0; return editing ? '' : `<span class="sl${n ? ' on' : ''}" role="button" data-slides="${esc(d)}" data-n="${n}" aria-label="Slides">${slidesIco()}${n > 1 ? 'Slides · ' + n : n ? 'Slides' : '+ Slides'}</span>`; };
+  const slidesChip = d => { const n = slideN.get(d) || 0; return editing ? '' : `<span class="sl${n ? ' on' : ''}" role="button" data-slides="${esc(d)}" data-n="${n}" aria-label="Slides">${slidesIco()}${n > 1 ? 'Slides · ' + n : n ? 'Slides' : '+ Slides'}</span>`; };
   const deckCard = (d, withFolder) => {
     const cs = cards.filter(c => c.deck === d), n = cs.length, todo = todoOf(cs), mat = cs.filter(c => c.interval >= 21).length;
     return `<button class="deckcard${editing ? ' editing' : ''}" data-deck="${esc(d)}" ${todo ? '' : 'data-practice="1"'}>${delBadge('deldeck', d)}${renBadge('rendeck', d)}
@@ -1188,11 +1081,12 @@ async function home(msg = '') {
     const dn = new Map([...cache.deckId].map(([n, id]) => [id, n])), by = new Map(), covers = await signedCovers(files);
     files.forEach(f => { const n = dn.get(f.deck_id); by.set(n, [...(by.get(n) || []), f]); });
     const del = f => `data-delfile="${f.id}" data-path="${esc(f.storage_path)}" data-name="${esc(f.file_name)}"`;
-    const open = f => `data-open="${f.id}" data-oname="${esc(f.file_name.replace(/\.pdf$/i, ''))}"`;
-    const tiles = fs => `<div class="sgrid">${fs.map(f => `<div class="stile" ${open(f)} role="button" tabindex="0">${tileBody(f, covers.get(f.id))}<button class="sx" ${del(f)} aria-label="Remove ${esc(f.file_name)}">${svg(TRASH_PATH, 18)}</button></div>`).join('')}</div>`;
+    const open = f => `data-open="${f.id}" data-path="${esc(f.storage_path)}" data-oname="${esc(f.file_name.replace(/\.pdf$/i, ''))}"`;
+    const tiles = fs => `<div class="sgrid">${fs.map(f => `<div class="stile${slideSel?.has(f.id) ? ' sel' : ''}" ${open(f)} role="button" tabindex="0">${tileBody(f, covers.get(f.id))}${slideSel ? '' : `<button class="sx" ${del(f)} aria-label="Remove ${esc(f.file_name)}">${svg(TRASH_PATH, 18)}</button>`}</div>`).join('')}</div>`;
     if (!by.has(slideDeck)) slideDeck = '';   // that deck has no slides any more
-    if (!gen) body = `<div class="toprow"><div style="padding-right:84px"><h1 class="pt">Slides</h1><p class="tag">${files.length ? files.length + ' file' + (files.length === 1 ? '' : 's') + ' · tap one to open it' : 'all your uploaded slides, by deck'}</p></div>
-      <div class="tbtns"><button class="p plus" data-act="uploadslides" aria-label="Upload slides">${svg('<path d="M12 5v14M5 12h14"/>', 30)}</button></div></div>${banner}
+    if (!gen) body = `<div class="toprow"><div><h1 class="pt">Slides</h1><p class="tag">${files.length ? files.length + ' file' + (files.length === 1 ? '' : 's') + (slideSel ? ' · tap slides to select them' : ' · tap one to open it') : 'all your uploaded slides, by deck'}</p></div>
+      <div class="tbtns">${files.length ? `<button class="edit${slideSel ? ' on' : ''}" data-act="selslides">${slideSel ? 'Done' : 'Select'}</button>` : ''}<button class="p plus" data-act="uploadslides" aria-label="Upload slides">${svg('<path d="M12 5v14M5 12h14"/>', 30)}</button></div></div>${banner}
+    ${slideSel ? `<div class="selbar"><span id="selcount"></span><button id="selall">Select all</button><button class="p" id="seldel" disabled>Delete</button></div>` : ''}
     ${by.size ? `<select class="inp" id="sdf" aria-label="Filter by deck" style="margin-bottom:18px"><option value="">All decks</option>${[...by.keys()].map(n => `<option value="${esc(n)}" ${n === slideDeck ? 'selected' : ''}>${esc(n)}</option>`).join('')}</select>` : ''}
     ${by.size ? [...by].filter(([n]) => !slideDeck || n === slideDeck).map(([n, fs]) => `<h2 style="margin:18px 0 10px">${esc(n)}</h2>${tiles(fs)}`).join('')
       : '<p class="tag emptynote" style="font-size:18px;max-width:46ch">No slides yet. Tap + to upload a PDF and choose the deck it belongs to.</p>'}`;
@@ -1288,7 +1182,7 @@ async function home(msg = '') {
   $.querySelectorAll('[data-slides]').forEach(x => x.onclick = e => {
     e.stopPropagation(); e.preventDefault();
     const d = x.dataset.slides;
-    if (+x.dataset.n === 1) openSlides(d); else slidesSheet(d);
+    if (+x.dataset.n) { slideDeck = d; view = 'slides'; home(); } else uploadDialog(d);   // a deck's slides are listed in the Slides tab; a deck with none gets the upload dialog with the deck picked
   });
   $.querySelectorAll('[data-rendeck],[data-renfolder]').forEach(x => x.onclick = e => {
     e.stopPropagation(); e.preventDefault();
@@ -1345,8 +1239,29 @@ async function home(msg = '') {
   $.querySelectorAll('[data-act=newfolder]').forEach(b => b.onclick = () => newFolderDialog(n => home(`Folder "${n}" created.`)));
   $.querySelectorAll('[data-act=adddeck]').forEach(b => b.onclick = () => importDialog(b.dataset.pre || ''));
   $.querySelectorAll('[data-act=uploadslides]').forEach(b => b.onclick = uploadDialog);
-  if (q('#sdf')) q('#sdf').onchange = e => { slideDeck = e.target.value; home(); };
-  $.querySelectorAll('[data-open]').forEach(b => b.onclick = e => { if (!e.target.closest('[data-delfile]')) enlargeSlide({ file_id: b.dataset.open, page: 1 }, b.dataset.oname); });
+  if (q('#sdf')) q('#sdf').onchange = e => { slideDeck = e.target.value; slideSel?.clear(); home(); };
+  $.querySelectorAll('[data-act=selslides]').forEach(b => b.onclick = () => { slideSel = slideSel ? null : new Set(); home(); });
+  const tilesNow = () => [...$.querySelectorAll('[data-open]')];
+  const syncSel = () => {
+    if (!slideSel) return;
+    const n = slideSel.size;
+    q('#selcount').textContent = n ? `${n} selected` : 'Nothing selected';
+    q('#seldel').disabled = !n; q('#seldel').textContent = n ? `Delete ${n}` : 'Delete';
+    q('#selall').textContent = n && n === tilesNow().length ? 'Clear' : 'Select all';
+  };
+  syncSel();
+  if (q('#selall')) q('#selall').onclick = () => { const every = tilesNow().length === slideSel.size; slideSel.clear(); tilesNow().forEach(b => { b.classList.toggle('sel', !every); if (!every) slideSel.add(b.dataset.open); }); syncSel(); };
+  if (q('#seldel')) q('#seldel').onclick = () => {
+    const picked = tilesNow().filter(b => slideSel.has(b.dataset.open)), n = picked.length;
+    confirmDialog(`Remove ${n} slide file${n === 1 ? '' : 's'}?`, 'They are removed from their decks. If another deck uses the same PDF, that deck keeps it. Questions already made from them stay.', 'Remove', async () => {
+      await removeSlideFiles(picked.map(b => ({ id: b.dataset.open, path: b.dataset.path })));
+      slideSel = null; home(`Removed ${n} slide file${n === 1 ? '' : 's'}.`);
+    });
+  };
+  $.querySelectorAll('[data-open]').forEach(b => b.onclick = e => {
+    if (slideSel) { const id = b.dataset.open; slideSel.has(id) ? slideSel.delete(id) : slideSel.add(id); b.classList.toggle('sel'); syncSel(); return; }
+    if (!e.target.closest('[data-delfile]')) enlargeSlide({ file_id: b.dataset.open, page: 1 }, b.dataset.oname);
+  });
   $.querySelectorAll('[data-gen]').forEach(b => b.onclick = () => generateDialog(b.dataset.gen));
   if (q('#subscribe')) q('#subscribe').onclick = () => modal(`<h2>Subscribe to ${PLAN.name}</h2>
     <p>Online payment isn't ready yet, so for now it's two steps:</p>
@@ -1355,10 +1270,7 @@ async function home(msg = '') {
     <div class="row end"><button id="c">Close</button><a class="btn p" href="${esc(PAY_FORM)}" target="_blank" rel="noopener">Open the form</a></div>
     <p class="fine">We switch your plan on by hand after checking the payment, usually within a day.</p>`, (o, close) => o.querySelector('#c').onclick = close);
   $.querySelectorAll('[data-delfile]').forEach(b => b.onclick = () => confirmDialog('Remove these slides?', `"${b.dataset.name}" is removed from this deck. If other decks use it, they keep it. Questions already made from it stay.`, 'Remove', async () => {
-    chk(await sb.from('slide_files').delete().eq('id', b.dataset.delfile));
-    const { count } = await sb.from('slide_files').select('id', { count: 'exact', head: true }).eq('storage_path', b.dataset.path);
-    if (!count) await sb.storage.from('slides').remove([b.dataset.path, coverPath(b.dataset.path)]);   // attached to other decks too? keep the stored PDF
-    await pruneDecks();
+    await removeSlideFiles([{ id: b.dataset.delfile, path: b.dataset.path }]);   // attached to other decks too? the stored PDF stays
     home('Slides removed.');
   }));
 }
@@ -1367,8 +1279,7 @@ async function home(msg = '') {
 // practice = review everything now; never touches the schedule or stats
 async function study(sel, practice = false) {
   document.body.classList.add('studying');
-  const [cards, logs, pdfN] = await Promise.all([all('cards'), all('logs'), pdfCounts(), slideMode === 'off' ? 0 : loadSlideFiles().catch(() => {})]);
-  if (slideMode !== 'off') localPdfLists = new Map((await Promise.all([...new Set(cards.map(c => c.deck))].map(async d => [d, await pdfList(d)]))).filter(([, l]) => l.length));
+  const [cards, logs] = await Promise.all([all('cards'), all('logs'), slideMode === 'off' ? 0 : loadSlideFiles().catch(() => {})]);
   const now = Date.now(), pool = sel?.deck ? cards.filter(c => c.deck === sel.deck) : sel?.folder ? cards.filter(c => folderOf(c.deck) === sel.folder) : cards;
   const wrong = wrongIds(logs), due = pool.filter(c => c.reps && c.due <= now).sort((a, b) => a.due - b.due), fresh = pool.filter(c => !c.reps);
   let queue = practice ? pool.map(c => ({ ...c })).sort(() => Math.random() - .5)
@@ -1389,24 +1300,23 @@ async function study(sel, practice = false) {
     const c = queue[0], isNew = !c.reps, t0 = Date.now(), hasSlide = slideMode !== 'off' && cardSlides(c).length > 0;
     $.innerHTML = `<div class="sbar"><button class="x" id="back" aria-label="Close">${svg('<path d="M6 6l12 12M18 6 6 18"/>', 28)}</button>
         <div class="prog"><i style="width:${prevPct}%"></i></div><span class="cnt">${practice ? 'Practice · ' : ''}${queue.length} left</span><button class="hct2${hideCh ? ' on' : ''}" id="hq" aria-pressed="${hideCh}">Hide choices: ${hideCh ? 'On' : 'Off'}</button></div>
-      <div class="page study${hasSlide ? ' withslide' : ''}">
+      <div class="page study withslide">
       <div class="kick">${isNew ? 'New question' : practice ? 'Practice' : 'Review'}</div>
       <h2 class="qh">Choose the best answer</h2>
       <div class="qgrid"><div class="qcol"><p class="stem">${esc(c.stem)}</p>
       ${hideCh ? '<button class="p" id="rv" style="width:100%;margin-bottom:14px">Show choices</button>' : ''}
       <div id="opts" ${hideCh ? 'hidden' : ''}>${c.options.map((o, i) => `<button class="opt" data-i="${i}"><b>${'ABCDEFGH'[i] || i + 1}</b><span>${esc(o)}</span></button>`).join('')}</div>
-      <p class="kbd">A–E to answer · ${practice ? 'Enter to continue' : '1 Again · 2 Hard · 3 Good · 4 Easy · Enter to continue'}</p>
-      <div id="after"></div></div>${hasSlide ? '<aside id="sp" class="sp"></aside>' : ''}</div></div>
+      <p class="kbd">A–E to answer · ${practice ? 'Enter to continue' : '1 Again · 2 Hard · 3 Good · 4 Easy · Enter to continue'}</p></div>
+      <aside class="sp"><div id="slot"></div><div id="after"></div></aside></div></div>
       <div class="snav"><button id="sb" aria-label="Previous question" ${hist.length ? '' : 'disabled'}>‹ Back</button><span>Current question</span><button id="sf" aria-label="Skip question" ${queue.length > 1 ? '' : 'disabled'}>Skip ›</button></div>`;
     pinBar();
-    const sp = $.querySelector('#sp');
+    const slot = $.querySelector('#slot');
     const setSlide = answered => {
-      if (!sp) return;
-      const study = $.querySelector('.study'), show = slideMode === 'both' || slideMode === (answered ? 'after' : 'before');
-      // the question sits centered on its own; when the slide shows it slides left and the slide pops in on the right
-      const toggle = () => { study.classList.toggle('split', show); pinBar(); };
-      if (answered && document.startViewTransition && !calm()) document.startViewTransition(toggle); else toggle();
-      if (show) showSlide(sp, c); else sp.innerHTML = '';
+      const study = $.querySelector('.study'), show = hasSlide && (slideMode === 'both' || slideMode === (answered ? 'after' : 'before'));
+      // the question sits centered on its own; once answered it slides left and the side panel pops in on the right (the slide, if shown, with the rating buttons under it)
+      const toggle = () => { study.classList.toggle('split', show || answered); pinBar(); };
+      if (answered && innerWidth >= 900 && document.startViewTransition && !calm()) document.startViewTransition(toggle); else toggle();
+      if (!show) slot.innerHTML = ''; else if (!slot.firstChild) showSlide(slot, c);
     };
     setSlide(false);
     const pct = Math.max(0, 100 * (1 - queue.length / total));
@@ -1436,9 +1346,12 @@ async function study(sel, practice = false) {
       const pick = +b.dataset.i, correct = pick === c.answer, ms = Date.now() - t0;
       play(correct ? 'ok' : 'no');
       setSlide(true);
-      hist.push({ c, pick, correct }); $.querySelector('.snav').style.display = $.querySelector('#hq').style.display = 'none';   // hide while rating, so it never covers the feedback popup
+      hist.push({ c, pick, correct }); $.querySelector('#hq').style.display = 'none';
+      const bk = $.querySelector('#sb'), nx = $.querySelector('#sf');   // the bottom bar stays: Back looks at the previous question, Next does what the main button does (rate Good / continue)
+      bk.disabled = hist.length < 2; bk.onclick = () => review(hist.length - 2);
+      nx.textContent = 'Next ›'; nx.setAttribute('aria-label', 'Next question'); nx.disabled = false; nx.onclick = () => $.querySelector('[data-r].p').click();
       if (correct) { const r = b.getBoundingClientRect(); burst(r.left + r.width / 2, r.top + r.height / 2, 24); }
-      $.querySelectorAll('.opt').forEach((x, i) => { x.disabled = true; if (i === c.answer) x.classList.add('ok'); else if (i === pick) x.classList.add('no'); });
+      $.querySelectorAll('.opt').forEach((x, i) => { x.disabled = true; if (i === c.answer) x.classList.add('ok'); else if (i === pick) x.classList.add('no'); x.insertAdjacentHTML('afterend', oexHtml(c, i)); });
       const rate = async rating => {
         if (practice) { queue.shift(); if (!correct) queue.push(c); return next(); }
         const was = c.interval, t = Date.now();
@@ -1453,13 +1366,14 @@ async function study(sel, practice = false) {
       $.querySelector('#after').innerHTML = `<div class="fb ${correct ? 'ok' : 'no'}">
         <div class="fbh"><span class="fbi">${svg(correct ? '<path d="m5 12.500 4.500 4.500L19 7.500"/>' : '<path d="M6 6l12 12M18 6 6 18"/>')}</span>
           <div><strong>${correct ? praise : 'Not quite'}</strong>${correct ? '' : `<small>Correct answer: ${'ABCDEFGH'[c.answer] || c.answer + 1}. ${esc(c.options[c.answer])}</small>`}</div></div>
-        ${explainHtml(c)}
         <div class="row rate">${correct && !practice
           ? ['again', 'hard', 'good', 'easy'].map(r => `<button data-r="${r}" ${r === 'good' ? 'class="p"' : ''}>${r}</button>`).join('')
           : `<button data-r="again" class="p">${correct ? 'Continue' : 'Next'}</button>`}</div>
+        ${correct && !practice ? '<div class="row"><button id="nxt" class="p" style="width:100%">Next</button></div>' : ''}
         ${practice && !correct ? '<p class="hint">Missed ones come back until you get them right.</p>' : ''}</div>`;
       $.querySelector('.fb').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
       $.querySelectorAll('[data-r]').forEach(x => x.onclick = () => rate(x.dataset.r));
+      const nxt = $.querySelector('#nxt'); if (nxt) nxt.onclick = () => rate('good');   // same as Good, for when you don't want to grade it
     });
   };
   const review = i => {   // read-only look at an answered question; Forward walks back toward the current one, which starts fresh
@@ -1468,8 +1382,7 @@ async function study(sel, practice = false) {
       <div class="page study">
       <div class="kick">${correct ? 'You got this right' : 'You got this wrong'}</div>
       <p class="stem">${esc(c.stem)}</p>
-      <div id="opts">${c.options.map((o, j) => `<button class="opt ${j === c.answer ? 'ok' : j === pick ? 'no' : ''}" disabled><b>${'ABCDEFGH'[j] || j + 1}</b><span>${esc(o)}</span></button>`).join('')}</div>
-      ${c.explanation ? `<div class="fb ${correct ? 'ok' : 'no'}">${explainHtml(c)}</div>` : ''}</div>
+      <div id="opts">${c.options.map((o, j) => `<button class="opt ${j === c.answer ? 'ok' : j === pick ? 'no' : ''}" disabled><b>${'ABCDEFGH'[j] || j + 1}</b><span>${esc(o)}</span></button>${oexHtml(c, j)}`).join('')}</div></div>
       <div class="snav"><button id="sb" aria-label="Earlier question" ${i ? '' : 'disabled'}>‹ Back</button><span>${i + 1} of ${hist.length} answered</span><button id="sf" aria-label="${last ? 'Back to current question' : 'Later question'}">${last ? 'Current' : 'Forward'} ›</button></div>`;
     pinBar();
     $.querySelector('#back').onclick = () => home();
@@ -1581,4 +1494,5 @@ sb.auth.getSession().then(({ data }) => {
   // zoom follows the account; theme.js only reads localStorage, so mirror it there
   ready.then(() => getMeta('zoom')).then(z => { if (z && z !== zoomNow()) { document.documentElement.style.zoom = z; try { localStorage.setItem('zoom', z); } catch {} } }).catch(() => {});
   home(); splash();
+  ready.then(migrateDevicePdfs).then(n => { if (n && !document.body.classList.contains('studying')) home(`Moved ${n} slide file${n === 1 ? '' : 's'} from this device into your account.`); }).catch(() => {});
 });
