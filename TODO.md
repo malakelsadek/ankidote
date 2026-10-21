@@ -77,6 +77,7 @@ Last updated: 2026-10-17. Nothing below has been pushed to the live site yet (co
 - [x] 2026-10-21: Explanations are structured: the reason the answer is right, then a tidy list "Why the others are wrong" with a lettered row per option, and the correct letter is no longer repeated. Older single-paragraph explanations are split automatically; the Guide prompts and the multi-slide test deck use the new line-per-option layout
 - [x] 2026-10-21: Guide is back to 3 steps: Add a deck now imports the .json and uploads the attached PDFs to your account (cloud) in one go, with progress shown; the separate "Add the slides" step is gone
 - [x] 2026-10-21: Filled in the name and contact email in the privacy policy
+- [x] 2026-10-21: Added "Managing subscriptions by hand" to this file: columns, how the plan is decided, and SQL to activate, renew, cancel, restart the trial, give back a run, and look people up
 
 ### SQL files, run in this order in Supabase (SQL Editor)
 1. `supabase/schema.sql`
@@ -155,6 +156,75 @@ This is cosmetic and safe: Google shows the address that receives the login, whi
 - [ ] At least one native touch (for example study reminders)
 - [ ] Icon, screenshots, description, privacy nutrition labels, in-app purchase for subscriptions
 - [ ] Submit and fix whatever review flags
+
+## Managing subscriptions by hand (until payments are automatic)
+
+Each user has one row in the `subscriptions` table (Supabase, Table Editor, or paste the SQL below into the SQL Editor). Replace `person@example.com` with their sign-in email. People can only read their own row, so only you can change these.
+
+**Columns**
+- `status`: `trial`, `active` or `canceled`
+- `current_period_end`: paid access lasts until this moment
+- `trial_ends_at`: when the 7-day free trial ends
+- `trial_generations_used`: free AI runs already used (the trial allows 2)
+- `provider`: write `manual` when you set it by hand (later `paymob`)
+
+**How the app decides a user's plan**
+- **Active:** `status` is `active` AND `current_period_end` is in the future. After that date they are on the free plan, even if `status` still says `active`
+- **Trial:** otherwise, if `trial_ends_at` is in the future
+- **Free plan:** anything else (decks, slides, studying and stats are always free)
+- Changes show up after the user reloads the app
+
+**Find a user, or see everyone**
+```sql
+select id, email from auth.users where email = 'person@example.com';
+
+select u.email, s.status, s.trial_ends_at, s.trial_generations_used, s.current_period_end, s.provider
+from subscriptions s join auth.users u on u.id = s.user_id order by u.email;
+```
+
+**Activate (one month from now)**
+```sql
+update subscriptions
+set status = 'active', current_period_end = now() + interval '1 month', provider = 'manual'
+where user_id = (select id from auth.users where email = 'person@example.com');
+```
+
+**Renew or extend (adds a month to whatever time they have left)**
+```sql
+update subscriptions
+set status = 'active', current_period_end = greatest(coalesce(current_period_end, now()), now()) + interval '1 month', provider = 'manual'
+where user_id = (select id from auth.users where email = 'person@example.com');
+```
+
+**Cancel**
+- To stop them at once: set `status` to `canceled`. They lose paid access immediately
+- To let them finish what they paid for: do nothing. Access ends on `current_period_end`
+```sql
+update subscriptions set status = 'canceled'
+where user_id = (select id from auth.users where email = 'person@example.com');
+```
+
+**Restart or extend the free trial**
+```sql
+update subscriptions
+set status = 'trial', trial_ends_at = now() + interval '7 days', trial_generations_used = 0
+where user_id = (select id from auth.users where email = 'person@example.com');
+```
+
+**Give back one free AI run**
+```sql
+update subscriptions set trial_generations_used = greatest(trial_generations_used - 1, 0)
+where user_id = (select id from auth.users where email = 'person@example.com');
+```
+
+**Check one person**
+```sql
+select s.* from subscriptions s join auth.users u on u.id = s.user_id where u.email = 'person@example.com';
+```
+
+Notes
+- Subscription and Generate with AI currently say "Coming soon" (`COMING_SOON` in app.js), so a status change has no visible effect until those are switched back on
+- When the Paymob webhook exists it will set `status = 'active'` and `current_period_end` itself, with `provider = 'paymob'`
 
 ## Known limits and notes
 - Slide PDFs attached the old manual way (Decks tab, + Slides) still live on the device only; cloud slides are the Generate page
