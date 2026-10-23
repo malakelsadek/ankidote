@@ -1173,6 +1173,7 @@ async function home(msg = '') {
   const screen = view + '|' + folder, still = screen === lastScreen;
   lastScreen = screen;
   $.innerHTML = `<div class="page${still ? ' still' : ''}">${body}</div>`;
+  document.body.classList.toggle('scrolled', $.scrollTop > 6);
   if (!still) {
     $.querySelectorAll('.folders>*,.bigf>*,.deckgrid>*,.grid>*,.two>*,.morelist>*').forEach((el, i) => { el.style.animationDelay = Math.min(i, 10) * 55 + 120 + 'ms'; });
     $.querySelectorAll('.act>div,.fc>div').forEach((el, i) => el.style.setProperty('--d', i * 45 + 200 + 'ms'));
@@ -1496,6 +1497,7 @@ function signIn() {
     msg(error ? error.message : 'Check your email for the sign-in link.');
   };
 }
+$.addEventListener('scroll', () => document.body.classList.toggle('scrolled', $.scrollTop > 6), { passive: true });   // phone: shows the bar behind the pinned top buttons
 sb.auth.getSession().then(({ data }) => {
   if (!data.session) return signIn();
   me = data.session.user;

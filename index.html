@@ -667,6 +667,15 @@ body.studying .tbtns,body.studying .hud{display:none}
 .morelist{gap:12px}
 .morerow{min-height:72px;padding:12px 16px}
 .zoomr{width:100%}
+.crumb{position:fixed;top:calc(max(18px,env(safe-area-inset-top)) + 7px);left:max(8px,env(safe-area-inset-left));z-index:20;margin:0;min-height:46px}   /* same centre line as the streak and Edit buttons */
+.hud .edit{position:relative;top:-4px}   /* phone: Edit rides a little higher than the streak */
+nav.min{width:auto}
+nav.min .nv span{display:inline}   /* a sidebar minimized on a bigger screen must not squash the phone tab bar */
+.crumb+.pt{margin-top:60px}
+.snav{gap:8px}
+.snav button{padding:0 14px;min-height:46px}
+.snav span{font-size:12px;white-space:nowrap}   /* bottom bar on a phone: the middle label stays on one line */
+body.scrolled:not(.studying):has(.tbtns,.hud)::before{content:"";position:fixed;left:0;right:0;top:0;height:calc(max(18px,env(safe-area-inset-top)) + 62px);background:var(--bg);border-bottom:2px solid var(--line);z-index:19}   /* phone: once the page scrolls, a bar sits behind the pinned buttons */
 .toprow>div:first-child{padding-right:0!important}
 .toprow .pt{padding-right:156px}
 .toprow .tag{margin-top:10px}   /* phone: only the title makes room for the corner buttons; the tagline gets the full width */
