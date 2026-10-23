@@ -40,7 +40,12 @@
   const apply = () => {
     const { light, dark } = P[cur], dk = block(dark, .11);
     el.textContent = `:root{${block(light, .13)}}@media(prefers-color-scheme:dark){:root:not([data-theme=light]){${dk}}}:root[data-theme=dark]{${dk}}`;
+    window.syncBar();
   };
+  // the phone's status bar / browser bar takes the app's background colour (Android Chrome and iOS Safari read this tag)
+  const bar = document.querySelector('meta[name=theme-color]');
+  window.syncBar = () => { if (bar) bar.content = getComputedStyle(document.documentElement).getPropertyValue('--bg').trim() || bar.content; };
+  matchMedia('(prefers-color-scheme:dark)').addEventListener?.('change', () => window.syncBar());
   apply();
 
   window.PALETTES = Object.entries(P).map(([id, p]) => ({ id, label: p.label, sw: [p.light.acc, p.light.blue] }));

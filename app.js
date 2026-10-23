@@ -270,6 +270,7 @@ const theme = () => document.documentElement.dataset.theme || 'auto';
 function setTheme(v) {
   if (v === 'auto') delete document.documentElement.dataset.theme; else document.documentElement.dataset.theme = v;
   try { v === 'auto' ? localStorage.removeItem('theme') : localStorage.setItem('theme', v); } catch {}
+  syncBar();
 }
 // synthesized with WebAudio so there are no sound files to cache
 // tap = soft pop, ok = bright bell arpeggio, no = soft muffled "bonk", done = little fanfare

@@ -107,6 +107,7 @@ Last updated: 2026-10-17. Nothing below has been pushed to the live site yet (co
 - [x] 2026-10-23: Phone: the pinned back button, streak and Edit sit on one line, the bar behind them is thinner, and the study screen's bottom bar (Back / label / Next) no longer squeezes its label onto two lines
 - [x] 2026-10-23: Phone: the bottom tab bar no longer collapses into a tiny squashed icon cluster when the sidebar was minimized earlier on a bigger screen (the saved Minimize setting was leaking into the phone layout)
 - [x] 2026-10-23: Phone: Edit is a few pixels higher than the streak, with the original space between them
+- [x] 2026-10-23: Phone: the status bar / browser bar now takes the app's background colour (follows the colour theme and light / dark, updated live); installed-app splash and bar colour default to dark; iOS installed app uses a black status bar. The white strip at the very bottom (Android gesture bar) is set by the phone, see notes
 - [x] 2026-10-22: Slides tab: Select button to pick several slide files (tap tiles, Select all / Clear) and delete them in one go
 - [x] 2026-10-22: Slides and decks are one thing: all slides go to the account attached to a deck (the old "+ Slides" device-only route is removed, old device PDFs are moved to the account automatically), and renaming a deck keeps its slides (before, the slides stayed under the old name)
 - [x] 2026-10-22: Add a deck (also the Guide's step 3) says so when the slides were not uploaded because the deck did not import

@@ -3,8 +3,8 @@
   "short_name": "ankidote",
   "start_url": ".",
   "display": "standalone",
-  "background_color": "#fff6f9",
-  "theme_color": "#fff6f9",
+  "background_color": "#1a1418",
+  "theme_color": "#1a1418",
   "icons": [
     {
       "src": "icon-192.png",
