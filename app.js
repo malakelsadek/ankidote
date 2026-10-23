@@ -1379,9 +1379,11 @@ async function study(sel, practice = false) {
         <div class="row rate">${correct && !practice
           ? ['again', 'hard', 'good', 'easy'].map(r => `<button data-r="${r}" ${r === 'good' ? 'class="p"' : ''}>${r}</button>`).join('')
           : `<button data-r="again" class="p">${correct ? 'Continue' : 'Next'}</button>`}</div>
+        ${correct && !practice ? '<div class="row"><button id="nxt" class="p" style="width:100%">Next</button></div>' : ''}
         ${practice && !correct ? '<p class="hint">Missed ones come back until you get them right.</p>' : ''}</div>`;
       ($.querySelector('.opt.ok + .oex') || $.querySelector('.fb')).scrollIntoView({ block: 'nearest', behavior: 'smooth' });   // bring the right answer's reason into view (it keeps clear of the bars via scroll-margin)
       $.querySelectorAll('[data-r]').forEach(x => x.onclick = () => rate(x.dataset.r));
+      const nxt = $.querySelector('#nxt'); if (nxt) nxt.onclick = () => rate('good');   // Next = Good, the default
     });
   };
   const review = i => {   // read-only look at an answered question; Forward walks back toward the current one, which starts fresh

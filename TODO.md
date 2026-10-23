@@ -102,6 +102,7 @@ Last updated: 2026-10-17. Nothing below has been pushed to the live site yet (co
 - [x] 2026-10-23: The pink "due" card has one design per width of the card (it follows the interface size too): wide = number and label on the left and a compact button block (max 460px) on the right; narrow = number with its label beside it and every button spanning the card
 - [x] 2026-10-23: Phone: the opening splash screen is just the logo (a bit larger); tablet and desktop keep the logo with the name and tagline
 - [x] 2026-10-23: Phone: the line under the page title (for example "the antidote to medical exam stress") uses the full width instead of wrapping onto three lines beside the corner buttons
+- [x] 2026-10-23: The full-width Next button is back under Again / Hard / Good / Easy after a right answer; Next rates Good (the default), and you can still pick any of the four
 - [x] 2026-10-22: Slides tab: Select button to pick several slide files (tap tiles, Select all / Clear) and delete them in one go
 - [x] 2026-10-22: Slides and decks are one thing: all slides go to the account attached to a deck (the old "+ Slides" device-only route is removed, old device PDFs are moved to the account automatically), and renaming a deck keeps its slides (before, the slides stayed under the old name)
 - [x] 2026-10-22: Add a deck (also the Guide's step 3) says so when the slides were not uploaded because the deck did not import
