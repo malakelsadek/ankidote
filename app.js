@@ -272,7 +272,7 @@ function setTheme(v) {
   try { v === 'auto' ? localStorage.removeItem('theme') : localStorage.setItem('theme', v); } catch {}
 }
 // synthesized with WebAudio so there are no sound files to cache
-// ok = bright bell arpeggio, no = soft muffled "bonk", done = little fanfare
+// tap = soft pop, ok = bright bell arpeggio, no = soft muffled "bonk", done = little fanfare
 //
 // iOS quirks this works around:
 //  - an AudioContext starts suspended and only resumes from a tap, so we wait for resume() before scheduling notes
@@ -318,7 +318,7 @@ const wake = () => { if (sound && actx && actx.state !== 'running') audioOn(); }
 ['pointerdown', 'touchend', 'keydown'].forEach(e => addEventListener(e, () => { if (sound && !actx) audioOn(); else wake(); }, { passive: true, capture: true }));
 document.addEventListener('visibilitychange', () => { if (!document.hidden) wake(); });
 addEventListener('pageshow', wake);
-// subtle tick on any button/toggle; answer choices and the right/wrong buttons have their own sounds
+// soft pop on any button/toggle; answer choices and the right/wrong buttons have their own sounds
 addEventListener('click', e => {
   const b = e.target.closest('button, .btn, .tgl, [role=button]');
   if (b && !b.disabled && !b.matches('.opt, #t-ok, #t-no')) play('tap');
@@ -337,11 +337,11 @@ async function play(kind) {
         o.connect(g).connect(out); o.start(at); o.stop(at + len);
       });
     };
-    const tick = () => {                                     // soft "pop": tiny sine that glides down, ~60ms
+    const tick = () => {                                     // soft "pop": sine with a gentle attack and a low glide down, ~140ms; a little above the very first, quiet version
       const at = actx.currentTime + .03, o = actx.createOscillator(), g = actx.createGain();
-      o.frequency.setValueAtTime(900, at); o.frequency.exponentialRampToValueAtTime(520, at + .05);
-      g.gain.setValueAtTime(.0001, at); g.gain.exponentialRampToValueAtTime(.22, at + .004); g.gain.exponentialRampToValueAtTime(.0001, at + .07);
-      o.connect(g).connect(out); o.start(at); o.stop(at + .08);
+      o.frequency.setValueAtTime(680, at); o.frequency.exponentialRampToValueAtTime(430, at + .11);
+      g.gain.setValueAtTime(.0001, at); g.gain.exponentialRampToValueAtTime(.2, at + .014); g.gain.exponentialRampToValueAtTime(.0001, at + .15);
+      o.connect(g).connect(out); o.start(at); o.stop(at + .16);
     };
     const bonk = (f, t) => {                                 // low sine through a lowpass, gentle pitch drop
       const at = actx.currentTime + t + .03, o = actx.createOscillator(), g = actx.createGain(), lp = actx.createBiquadFilter();
@@ -410,6 +410,7 @@ const ICONS = {
   tour: '<path d="M8 5v14l11-7z"/>',
   subscription: '<rect x="3" y="6" width="18" height="12" rx="2"/><path d="M3 10h18M7 15h3"/>',
   generate: '<path d="M12 3l1.8 5.2L19 10l-5.2 1.8L12 17l-1.8-5.2L5 10l5.2-1.8zM19 16l.8 2.2L22 19l-2.2.8L19 22l-.8-2.2L16 19l2.2-.8z"/>',
+  community: '<circle cx="9" cy="8" r="3"/><path d="M3 20a6 6 0 0 1 12 0M16 5.500a3 3 0 0 1 0 5.500M18 20a5 5 0 0 0-3-4.600"/>',
   slides: '<rect x="3" y="4" width="18" height="12" rx="2"/><path d="M12 16v4M8 20h8"/>',
   more: '<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',
   chev: '<path d="m15 6-6 6 6 6"/>',
@@ -437,15 +438,22 @@ const accountBtn = () => {
   // if Google's picture won't load (blocked, rate-limited, offline) swap in the initial instead of a broken image
   return `<button class="nv wo acct" data-v="settings" title="${esc(name)}">${pic ? `<img class="av" src="${esc(pic)}" alt="" referrerpolicy="no-referrer" onerror="this.outerHTML='<i class=&quot;av&quot;>${ini}</i>'">` : `<i class="av">${ini}</i>`}<span>${esc(name.split(' ')[0])}</span></button>`;
 };
+const fitNav = () => {   // sidebar too tall for the screen (zoomed in a lot): hide the extra tabs and show More instead
+  const n = document.getElementById('nav');
+  n.classList.remove('crowd');
+  if (getComputedStyle(n).flexDirection === 'column' && n.scrollHeight > n.clientHeight + 1) n.classList.add('crowd');
+};
+addEventListener('resize', fitNav);
 function renderNav() {
   const nav = document.getElementById('nav');
   nav.className = min ? 'min' : '';
   nav.innerHTML = `<div class="brand"><img src="icon-192.png" alt="" width="36" height="36" style="border-radius:9px;display:block;flex:none">${min ? '' : '<span>ankidote</span>'}</div>`
-    + [['today', 'Study'], ['stats', 'Stats'], ['folders', 'Folders'], ['decks', 'Decks'], ['slides', 'Slides', 'wo'], ['generate', 'Generate', 'wo'], ['data', 'Data', 'wo'], ['guide', 'Guide', 'wo'], ['subscription', 'Subscription', 'wo'], ['settings', 'Settings', 'wo']].map(([v, l, c = '']) => (v === 'subscription' ? accountBtn() : '') +`<button class="nv ${c} ${v === view ? 'on' : ''}" data-v="${v}" title="${l}">${svg(ICONS[v])}<span>${l}</span></button>`).join('')
-    + `<button class="nv more ${['more', 'slides', 'generate', 'subscription', 'data', 'guide', 'settings'].includes(view) ? 'on' : ''}" data-v="more" title="More">${svg(ICONS.more)}<span>More</span></button>`
+    + [['today', 'Study'], ['stats', 'Stats'], ['folders', 'Folders'], ['decks', 'Decks'], ['slides', 'Slides', 'wo'], ['generate', 'Generate', 'wo'], ['community', 'Community', 'wo'], ['data', 'Data', 'wo'], ['guide', 'Guide', 'wo'], ['subscription', 'Subscription', 'wo'], ['settings', 'Settings', 'wo']].map(([v, l, c = '']) => (v === 'subscription' ? accountBtn() : '') +`<button class="nv ${c} ${v === view ? 'on' : ''}" data-v="${v}" title="${l}">${svg(ICONS[v])}<span>${l}</span></button>`).join('')
+    + `<button class="nv more ${['more', 'slides', 'generate', 'community', 'subscription', 'data', 'guide', 'settings'].includes(view) ? 'on' : ''}" data-v="more" title="More">${svg(ICONS.more)}<span>More</span></button>`
     + `<button class="nv tog" id="tog" title="${min ? 'Expand' : 'Minimize'}">${svg(ICONS.chev)}<span>Minimize</span></button>`;
   nav.querySelectorAll('[data-v]').forEach(b => b.onclick = () => { if (b.dataset.v === 'tour') return walkthrough(); view = b.dataset.v; editing = false; if (view === 'today') folder = null; home(); });
   nav.querySelector('#tog').onclick = () => { min = !min; try { localStorage.setItem('navmin', min ? '1' : '0'); } catch {} renderNav(); };
+  fitNav();
 }
 
 // ---- folders: "Subject - Lecture" decks are grouped by the part before the dash ----
@@ -960,18 +968,18 @@ async function home(msg = '') {
     body = `<div class="toprow"><div>${head}</div>
       <div class="hud">${hp('flame', '#ff9600', streak(logs), 'day streak')}${folder && scope.length ? editBtn : ''}</div></div>
     ${banner}
-    <section class="hero">
+    <div class="herow"><section class="hero">
       <div><span class="big">${cnt}</span><span class="lbl">${cnt || !scope.length ? { due: 'questions due', new: 'new questions', wrong: 'to redo' }[mode] : { due: 'all done for today', new: 'no new questions', wrong: 'nothing to redo' }[mode]} ${left}</span><div class="sub">${sDue} due · ${sNew} new · ${streak(logs)} day streak</div>
         <button class="hct${hideCh ? ' on' : ''}" id="hc" aria-pressed="${hideCh}">Hide choices first: ${hideCh ? 'On' : 'Off'}</button></div>
       <div class="sess"><div class="chips">${[['due', 'Due', sDue], ['new', 'New', sNew], ['wrong', 'Wrong', nWrong]].map(([m, l, n]) => `<button class="chip${m === mode ? ' on' : ''}" data-mode="${m}">${l}<small>${n}</small></button>`).join('')}</div>
         <div class="chips">${[10, 20, 30, 40].map(n => `<button class="chip${n === sess ? ' on' : ''}" data-size="${n}">${n}</button>`).join('')}</div>
         ${cnt ? `<button id="all" data-mode="${mode}" data-limit="${sess}" ${folder ? `data-folder="${esc(folder)}"` : ''}>Start ${Math.min(cnt, sess)} question${Math.min(cnt, sess) === 1 ? '' : 's'}</button>` : scope.length ? `<button id="all" data-practice="1" data-limit="${sess}" ${folder ? `data-folder="${esc(folder)}"` : ''}>Practice anyway</button>` : ''}</div>
-    </section>
+    </section></div>
     ${list}`;
   } else if (view === 'more') {
     const row = (v, t, d) => `<button class="morerow" data-go="${v}"><span class="mi">${svg(ICONS[v], 28)}</span><span class="mt"><b>${t}</b><small>${d}</small></span><span class="chv">›</span></button>`;
     body = `<h1 class="pt">More</h1><div style="height:20px"></div>${banner}
-    <div class="morelist">${row('slides', 'Slides', 'Your uploaded slides, by deck')}${row('generate', 'Generate', 'Write questions from your slides with AI')}${row('subscription', 'Subscription', 'Your plan and AI usage')}${row('data', 'Data', 'Import decks and back up your progress')}${row('guide', 'Guide', 'How to make decks with AI')}${row('settings', 'Settings', 'Theme, sounds and reminders')}</div>`;
+    <div class="morelist">${row('slides', 'Slides', 'Your uploaded slides, by deck')}${row('generate', 'Generate', 'Write questions from your slides with AI')}${row('community', 'Community', 'Decks shared by other students')}${row('subscription', 'Subscription', 'Your plan and AI usage')}${row('data', 'Data', 'Import decks and back up your progress')}${row('guide', 'Guide', 'How to make decks with AI')}${row('settings', 'Settings', 'Theme, sounds and reminders')}</div>`;
   } else if (view === 'decks') {
     const names = [...new Set(cards.map(c => c.deck))].sort((a, b) => folderOf(a).localeCompare(folderOf(b)) || a.localeCompare(b));
     body = `<div class="toprow"><div><h1 class="pt">All decks</h1><p class="tag">${names.length ? names.length + ' deck' + (names.length === 1 ? '' : 's') + ' · tap one to study it' : 'tap + to add your first deck'}</p></div>
@@ -1099,6 +1107,8 @@ async function home(msg = '') {
     <div style="height:14px"></div>
     ${by.size ? [...by].map(([n, fs]) => `<section class="card gdeck"><div><h2 style="margin:0 0 4px">${esc(n)}</h2><p style="margin:0">${fs.length} file${fs.length === 1 ? '' : 's'} · ${fs.reduce((t, f) => t + (f.page_count || 0), 0)} pages</p></div><button class="p" data-gen="${esc(n)}">Generate questions</button></section>`).join('')
       : '<section class="card"><p style="margin:0 0 14px">No slides yet. Upload your lecture slides first, then come back here.</p><button class="p" data-go="slides">Go to Slides</button></section>'}`;
+  } else if (view === 'community') {
+    body = `${soon('Community')}<p class="tag" style="font-size:18px;max-width:46ch">Decks shared by other students, ready to add and study.</p>`;
   } else if (view === 'subscription') {
     if (COMING_SOON.subscription) body = soon('Subscription');
     else {
@@ -1223,7 +1233,7 @@ async function home(msg = '') {
   if (q('#bkd')) q('#bkd').onchange = e => { bkDays = +e.target.value; try { localStorage.setItem('bkdays', bkDays); } catch {} };
   if (q('#zm')) {   // applied on release, because zooming while dragging would move the slider out from under the finger
     q('#zm').oninput = e => { q('#zv').textContent = e.target.value + '%'; };
-    q('#zm').onchange = e => { const z = e.target.value / 100; try { localStorage.setItem('zoom', z); } catch {} setMeta('zoom', String(z)); document.documentElement.style.zoom = z; };
+    q('#zm').onchange = e => { const z = e.target.value / 100; try { localStorage.setItem('zoom', z); } catch {} setMeta('zoom', String(z)); document.documentElement.style.zoom = z; fitNav(); };
   }
   $.querySelectorAll('[data-theme-set]').forEach(b => b.onclick = () => { setTheme(b.dataset.themeSet); home(); });
   if (q('#snd')) q('#snd').onchange = e => {
@@ -1369,11 +1379,9 @@ async function study(sel, practice = false) {
         <div class="row rate">${correct && !practice
           ? ['again', 'hard', 'good', 'easy'].map(r => `<button data-r="${r}" ${r === 'good' ? 'class="p"' : ''}>${r}</button>`).join('')
           : `<button data-r="again" class="p">${correct ? 'Continue' : 'Next'}</button>`}</div>
-        ${correct && !practice ? '<div class="row"><button id="nxt" class="p" style="width:100%">Next</button></div>' : ''}
         ${practice && !correct ? '<p class="hint">Missed ones come back until you get them right.</p>' : ''}</div>`;
-      $.querySelector('.fb').scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+      ($.querySelector('.opt.ok + .oex') || $.querySelector('.fb')).scrollIntoView({ block: 'nearest', behavior: 'smooth' });   // bring the right answer's reason into view (it keeps clear of the bars via scroll-margin)
       $.querySelectorAll('[data-r]').forEach(x => x.onclick = () => rate(x.dataset.r));
-      const nxt = $.querySelector('#nxt'); if (nxt) nxt.onclick = () => rate('good');   // same as Good, for when you don't want to grade it
     });
   };
   const review = i => {   // read-only look at an answered question; Forward walks back toward the current one, which starts fresh
@@ -1492,7 +1500,7 @@ sb.auth.getSession().then(({ data }) => {
   ready = loadAll();
   ready.catch(e => $.innerHTML = `<div class="page"><p>Couldn't load your data: ${esc(e.message)}</p><button onclick="location.reload()">Try again</button></div>`);
   // zoom follows the account; theme.js only reads localStorage, so mirror it there
-  ready.then(() => getMeta('zoom')).then(z => { if (z && z !== zoomNow()) { document.documentElement.style.zoom = z; try { localStorage.setItem('zoom', z); } catch {} } }).catch(() => {});
+  ready.then(() => getMeta('zoom')).then(z => { if (z && z !== zoomNow()) { document.documentElement.style.zoom = z; try { localStorage.setItem('zoom', z); } catch {} fitNav(); } }).catch(() => {});
   home(); splash();
   ready.then(migrateDevicePdfs).then(n => { if (n && !document.body.classList.contains('studying')) home(`Moved ${n} slide file${n === 1 ? '' : 's'} from this device into your account.`); }).catch(() => {});
 });

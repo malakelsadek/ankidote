@@ -82,6 +82,26 @@ Last updated: 2026-10-17. Nothing below has been pushed to the live site yet (co
 - [x] 2026-10-22: Study screen on a wide screen: after answering, the question slides left and a side panel appears with the slide (when there is one) and the rating buttons under it. On a phone the rating bar stays at the bottom
 - [x] 2026-10-22: Study screen: the bottom bar (Back / Next) now stays after you answer; Next does what the main button does (rate Good, or continue after a wrong answer), Back looks at the previous question
 - [x] 2026-10-22: After a right answer, a full-width Next button under Again / Hard / Good / Easy (it rates Good), like the Next after a wrong answer
+- [x] 2026-10-22: Noted in "Ideas to plan" that the Community tab can share folders and decks
+- [x] 2026-10-22: Community tab added under Generate (sidebar and More), showing "Coming soon" for now; shared decks are not built yet
+- [x] 2026-10-23: On a wide screen (iPad landscape, desktop) the rating card (Well done, Again / Hard / Good / Easy, Next) is pinned to the bottom-right corner above the Back / Next bar, so a thumb reaches it
+- [x] 2026-10-23: The click sound on buttons and toggles is a little louder than the first version but soft, with a gentle start and a lower pitch (not sharp); the correct, wrong and finish sounds are unchanged
+- [x] 2026-10-23: Pinned rating card: the animated, sticky slide panel was moved off the card's parent (the animation now sits on the slide only) so nothing can hold the card in the page
+- [x] 2026-10-23: Added "vibration on tap" to "Ideas to plan"
+- [x] 2026-10-23: The pinned rating card is back to the width of the slide column (it had become narrow and square): the side column now runs the full height and the card sticks to its bottom, instead of a fixed-width box
+- [x] 2026-10-23: Pinned rating card moved down a little, closer to the Back / Next bar
+- [x] 2026-10-23: When the interface is zoomed in so far that the sidebar no longer fits the screen, the extra tabs (Slides, Generate, Community, Data, Guide, Subscription, Settings and the account) fold into a More tab instead of being cut off
+- [x] 2026-10-23: The click sound is quieter again (about 40% lower), still a soft pop
+- [x] 2026-10-23: Phone layout pass: the answer bar is slim (a small verdict line plus the buttons, no repeated correct-answer text), and after answering the page scrolls so the right answer and its reason sit above the bar instead of under it
+- [x] 2026-10-23: Phone layout pass: Guide step numbers sit above the text so the cards use the full width, shorter folder tiles, tighter deck cards and More rows
+- [x] 2026-10-23: Phone: the "questions due" card no longer has an empty space beside the big number; the number sits left with the label and summary beside it
+- [x] 2026-10-23: Removed the extra Next button under Again / Hard / Good / Easy after a right answer (you pick one of the four); the bottom bar's Back / Next stays
+- [x] 2026-10-23: The pink "questions due" card now fills its full width at any screen or interface size (buttons grow to fit, the hide-choices button spans the card on phones)
+- [x] 2026-10-23: Settings, Interface size: the percentage no longer runs off the edge of the card (the slider shrinks to fit, and takes the full row on phones)
+- [x] 2026-10-23: Settings on a narrow phone: the colour theme tiles no longer stick out past the card
+- [x] 2026-10-23: The pink "due" card has one design per width of the card (it follows the interface size too): wide = number and label on the left and a compact button block (max 460px) on the right; narrow = number with its label beside it and every button spanning the card
+- [x] 2026-10-23: Phone: the opening splash screen is just the logo (a bit larger); tablet and desktop keep the logo with the name and tagline
+- [x] 2026-10-23: Phone: the line under the page title (for example "the antidote to medical exam stress") uses the full width instead of wrapping onto three lines beside the corner buttons
 - [x] 2026-10-22: Slides tab: Select button to pick several slide files (tap tiles, Select all / Clear) and delete them in one go
 - [x] 2026-10-22: Slides and decks are one thing: all slides go to the account attached to a deck (the old "+ Slides" device-only route is removed, old device PDFs are moved to the account automatically), and renaming a deck keeps its slides (before, the slides stayed under the old name)
 - [x] 2026-10-22: Add a deck (also the Guide's step 3) says so when the slides were not uploaded because the deck did not import
@@ -116,7 +136,8 @@ Last updated: 2026-10-17. Nothing below has been pushed to the live site yet (co
 - [ ] Question quality: correct content and format, a quality check, and editing so a wrong question can be corrected
 - [ ] Organized ways to create decks: manually, import, or AI
 - [ ] Link to the slide plus a better explanation, maybe voice or a character to help explain
-- [ ] Community tab (later): share your decks and import other people's decks
+- [ ] Vibrations (later): a light buzz on taps, a stronger one for a wrong answer, a short pattern when a session is done, with an on/off setting. `navigator.vibrate` works on Android but not in iOS Safari, so on iPad it would need the Capacitor app (haptics)
+- [ ] Community tab (later): share your decks and import other people's decks. People can share whole folders as well as single decks, and the tab shows both. The tab itself is in the app as "Coming soon"
 - [ ] Three ways to create a deck, offered in one place: (1) with AI, (2) import a community-shared deck, (3) make one manually
 - [ ] Fix sound sometimes not working/bugging (patched 2026-10-18 in `audioOn`; re-test on the iPad, then tick)
 - [ ] Owner-only dashboard (not inside the app): who is subscribed / unsubscribed, money coming in, feature requests, member activity
