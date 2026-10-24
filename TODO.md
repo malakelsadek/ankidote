@@ -170,6 +170,11 @@ This is cosmetic and safe: Google shows the address that receives the login, whi
 - [ ] Test with 5-10 classmates for a week
 - [ ] Offline study (the app currently needs a connection)
 - [x] 2026-10-22: Slides badge on deck tiles now counts the deck's cloud slide files (it used to count PDFs saved only in that browser). Tapping it opens the Slides tab on that deck, or the upload dialog with the deck picked when it has none
+- [x] 2026-10-24: Result card (Not quite / Correct) sits right above the bottom bar on desktop; tap the card to lower it so the slide arrows show, tap again to raise it
+- [x] 2026-10-24: Pinned study bars are positioned by CSS from the sidebar width (animated together), so they stay seamless when it minimizes or expands
+- [x] 2026-10-24: Study progress bar keeps the same shorter length after answering (the hidden Hide choices button holds its space)
+- [x] 2026-10-24: Result card sits right above the bottom bar on desktop (grid now reaches the bar); lowering it tucks it behind the bar
+- [x] 2026-10-24: Layout check on phone, tablet and desktop: phone Hide choices button slimmer so the progress bar stays the same length after answering; lowering the result card is desktop-only
 - [ ] Decide launch route: stay in Google Testing (add up to 100 test emails by hand, logins expire after about 7 days) or Publish app (needs domain, privacy and terms pages, Branding filled in). Past 100 people, or to skip adding emails, Publish is required
 - [ ] Order: domain, terms page, Branding and Publish app, Supabase Pro, Claude spend limit, account deletion, live-site push, 5-10 classmate test, then payments and the App Store
 

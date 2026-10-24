@@ -570,7 +570,7 @@ body.studying main{padding-top:0}
 .spnav .splab{flex:1;text-align:center;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .spnav button{min-height:56px;min-width:76px;padding:0 20px;font-size:28px;line-height:1}
 @media(max-width:899px){.spph{display:none}.sp{display:contents}}
-@media(min-width:900px){.study.split{max-width:1500px}.split .qgrid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:28px;align-items:start}.split .qgrid{flex:1}.split .sp{align-self:stretch;display:flex;flex-direction:column}.split #after{position:sticky;bottom:calc(88px + env(safe-area-inset-bottom));margin-top:auto;padding:0;z-index:6}.split #slot{position:sticky;top:calc(96px + env(safe-area-inset-top));animation:spin .4s .1s cubic-bezier(.2,.7,.2,1) backwards}}
+@media(min-width:900px){.split #after.low{transform:translateY(calc(100% - 78px))}.split #after .fbh{cursor:pointer}.study.split{max-width:1500px;padding-bottom:36px}.split .qgrid{display:grid;grid-template-columns:minmax(0,1.15fr) minmax(0,1fr);gap:28px;align-items:start}.split .qgrid{flex:1}.split .sp{align-self:stretch;display:flex;flex-direction:column}.split #after{position:sticky;bottom:calc(30px + env(safe-area-inset-bottom));transition:transform .3s cubic-bezier(.2,.8,.2,1);margin-top:auto;padding:0;z-index:4}.split #slot{position:sticky;top:calc(96px + env(safe-area-inset-top));animation:spin .4s .1s cubic-bezier(.2,.7,.2,1) backwards}}
 @keyframes spin{from{opacity:0;transform:translateX(28px)}}
 .withslide .qcol{view-transition-name:qcol}
 .spbox canvas{cursor:zoom-in}
@@ -713,6 +713,12 @@ body.scrolled:not(.studying):has(.tbtns,.hud)::before{content:"";position:fixed;
 .hero .hct{grid-column:1/-1;margin-top:12px;justify-self:stretch}
 .sess{flex:1 1 100%}
 }
+/* study bars: pinned beside the sidebar; --navw follows the sidebar and both animate together, so they stay seamless when it minimizes */
+:root{--navw:248px}:root:has(nav.min){--navw:88px}
+.sbar,.snav{--cw:765px;left:var(--navw);transition:left .2s,padding .2s;padding-inline:max(24px,calc((100% - var(--navw) - var(--cw)) / 2))}
+@media(min-width:900px){.sbar:has(+ .study.split),.study.split + .snav{--cw:1275px}}
+@media(max-width:699px){:root:has(nav){--navw:0px}}
+@media(max-width:699px){.sbar{gap:10px}.hct2{min-height:32px;padding:0 10px;font-size:11px;white-space:nowrap}.cnt{white-space:nowrap}}   /* phone: slimmer Hide choices button so the progress bar stays a usable length (it keeps that length after answering) */
 </style>
 </head>
 <body>

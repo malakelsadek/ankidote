@@ -1301,11 +1301,6 @@ async function study(sel, practice = false) {
   lastScreen = null;
   const total = queue.length;
   let prevPct = 0;
-  const pinBar = () => $.querySelectorAll('.snav,.sbar').forEach(b => {   // fixed to the screen top/bottom, beside the sidebar; content lines up with the question column (900px at .85 zoom)
-    b.style.left = document.getElementById('nav').offsetWidth + 'px'; b.style.paddingInline = '0';
-    b.style.paddingInline = Math.max(24, (b.clientWidth - (innerWidth >= 900 && $.querySelector('.split') ? 1275 : 765)) / 2) + 'px';
-  });
-  window.onresize = pinBar;
   const hist = [];   // questions answered this session, for looking back at
   const next = () => {
     if (!queue.length) { play('done'); burst(innerWidth / 2, innerHeight * .55, 150, 1.5); return home(`${practice ? 'Practice done' : 'Done'}. ${total} question${total === 1 ? '' : 's'} reviewed.`); };
@@ -1321,12 +1316,11 @@ async function study(sel, practice = false) {
       <p class="kbd">A–E to answer · ${practice ? 'Enter to continue' : '1 Again · 2 Hard · 3 Good · 4 Easy · Enter to continue'}</p></div>
       <aside class="sp"><div id="slot"></div><div id="after"></div></aside></div></div>
       <div class="snav"><button id="sb" aria-label="Previous question" ${hist.length ? '' : 'disabled'}>‹ Back</button><span>Current question</span><button id="sf" aria-label="Skip question" ${queue.length > 1 ? '' : 'disabled'}>Skip ›</button></div>`;
-    pinBar();
     const slot = $.querySelector('#slot');
     const setSlide = answered => {
       const study = $.querySelector('.study'), show = hasSlide && (slideMode === 'both' || slideMode === (answered ? 'after' : 'before'));
       // the question sits centered on its own; once answered it slides left and the side panel pops in on the right (the slide, if shown, with the rating buttons under it)
-      const toggle = () => { study.classList.toggle('split', show || answered); pinBar(); };
+      const toggle = () => { study.classList.toggle('split', show || answered); };
       if (answered && innerWidth >= 900 && document.startViewTransition && !calm()) document.startViewTransition(toggle); else toggle();
       if (!show) slot.innerHTML = ''; else if (!slot.firstChild) showSlide(slot, c);
     };
@@ -1358,7 +1352,7 @@ async function study(sel, practice = false) {
       const pick = +b.dataset.i, correct = pick === c.answer, ms = Date.now() - t0;
       play(correct ? 'ok' : 'no');
       setSlide(true);
-      hist.push({ c, pick, correct }); $.querySelector('#hq').style.display = 'none';
+      hist.push({ c, pick, correct }); $.querySelector('#hq').style.visibility = 'hidden';   // keeps its space so the progress bar doesn't stretch
       const bk = $.querySelector('#sb'), nx = $.querySelector('#sf');   // the bottom bar stays: Back looks at the previous question, Next does what the main button does (rate Good / continue)
       bk.disabled = hist.length < 2; bk.onclick = () => review(hist.length - 2);
       nx.textContent = 'Next ›'; nx.setAttribute('aria-label', 'Next question'); nx.disabled = false; nx.onclick = () => $.querySelector('[data-r].p').click();
@@ -1383,6 +1377,7 @@ async function study(sel, practice = false) {
           : `<button data-r="again" class="p">${correct ? 'Continue' : 'Next'}</button>`}</div>
         ${correct && !practice ? '<div class="row"><button id="nxt" class="p" style="width:100%">Next</button></div>' : ''}
         ${practice && !correct ? '<p class="hint">Missed ones come back until you get them right.</p>' : ''}</div>`;
+      $.querySelector('.fbh').onclick = () => $.querySelector('#after').classList.toggle('low');   // tap the card to lower it (reveals the slide's arrows), tap again to raise it
       ($.querySelector('.opt.ok + .oex') || $.querySelector('.fb')).scrollIntoView({ block: 'nearest', behavior: 'smooth' });   // bring the right answer's reason into view (it keeps clear of the bars via scroll-margin)
       $.querySelectorAll('[data-r]').forEach(x => x.onclick = () => rate(x.dataset.r));
       const nxt = $.querySelector('#nxt'); if (nxt) nxt.onclick = () => rate('good');   // Next = Good, the default
@@ -1396,7 +1391,6 @@ async function study(sel, practice = false) {
       <p class="stem">${esc(c.stem)}</p>
       <div id="opts">${c.options.map((o, j) => `<button class="opt ${j === c.answer ? 'ok' : j === pick ? 'no' : ''}" disabled><b>${'ABCDEFGH'[j] || j + 1}</b><span>${esc(o)}</span></button>${oexHtml(c, j)}`).join('')}</div></div>
       <div class="snav"><button id="sb" aria-label="Earlier question" ${i ? '' : 'disabled'}>‹ Back</button><span>${i + 1} of ${hist.length} answered</span><button id="sf" aria-label="${last ? 'Back to current question' : 'Later question'}">${last ? 'Current' : 'Forward'} ›</button></div>`;
-    pinBar();
     $.querySelector('#back').onclick = () => home();
     $.querySelector('#sb').onclick = () => review(i - 1);
     $.querySelector('#sf').onclick = () => last ? next() : review(i + 1);
